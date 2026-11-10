@@ -25,6 +25,8 @@ A yellow bar at the top tells you if something is missing.
 - Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
   starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
   it stopped until that channel goes offline. At most 6 recordings run at once (set CLIPFORGE_MAX_LIVE to change it).
+- Several videos are clipped at the same time: 3 tasks (download, find clips, render) run at once. Set
+  CLIPFORGE_WORKERS to change it. Speech-to-text still runs one video at a time to keep the computer responsive.
 
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
