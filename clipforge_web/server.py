@@ -1,5 +1,5 @@
 """ClipForge web app: API + the page. Local use: binds to 127.0.0.1 only unless a password is set."""
-import asyncio, hashlib, hmac, json, os, re, shutil
+import asyncio, hashlib, hmac, json, os, re, shutil, threading
 from typing import Optional
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
@@ -22,6 +22,7 @@ def _start():
     db.conn()
     db.ex("update videos set status='ready', stage='' where status='live'")      # live sessions don't survive a restart
     worker.start()
+    live.start_watcher()
 
 
 # ---------------- sign-in (one shared team password; set CLIPFORGE_PASSWORD to turn it on) ----------------
@@ -520,6 +521,22 @@ def live_clip(vid: int):
 def live_stop(vid: int):
     live.stop(vid)
     return {"ok": True}
+
+
+@app.get("/api/watch")
+def watch_get():
+    return {"urls": live.watch_list(), "status": {u: live.WATCH.get(u, "Checking soon") for u in live.watch_list()},
+            "max": live.MAX_LIVE, "every": live.WATCH_EVERY}
+
+
+@app.post("/api/watch")
+def watch_set(body: dict = Body(...)):
+    try:
+        live.set_watch_list(body.get("urls", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    threading.Thread(target=live.check_watch_list, daemon=True).start()   # check now, not in a minute
+    return watch_get()
 
 
 @app.get("/api/live/{vid}/stats")
