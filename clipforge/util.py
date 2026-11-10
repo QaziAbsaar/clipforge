@@ -58,10 +58,8 @@ class Job:
             self.cancel()
             raise Cancelled()
 
-    def run(self, cmd, cwd=None, show=False):
-        self.check()
-        err = tempfile.TemporaryFile()
-        p = subprocess.Popen(cmd, cwd=cwd, stdout=None if (show and self.show_output) else subprocess.DEVNULL, stderr=err)
+    def _wait(self, p, cmd, err, reader=None):
+        """Wait for a child process while honouring cancel; raise with the tail of stderr if it fails."""
         with self.lock:
             self.procs.add(p)
         try:
@@ -71,6 +69,8 @@ class Job:
         finally:
             with self.lock:
                 self.procs.discard(p)
+        if reader:
+            reader.join(timeout=3)
         err.seek(0)
         text = err.read().decode(errors="replace")
         err.close()
@@ -78,40 +78,27 @@ class Job:
             raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(map(str, cmd[:2]))}\n{text[-1500:]}")
         return text
 
+    def run(self, cmd, cwd=None, show=False):
+        self.check()
+        err = tempfile.TemporaryFile()
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=None if (show and self.show_output) else subprocess.DEVNULL, stderr=err)
+        return self._wait(p, cmd, err)
 
-def _run_lines(self, cmd, on_line, cwd=None):
-    """Like run(), but hands every output line to on_line() while the program runs (for progress bars)."""
-    self.check()
-    err = tempfile.TemporaryFile()
-    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1, errors="replace")
-    with self.lock:
-        self.procs.add(p)
+    def run_lines(self, cmd, on_line, cwd=None):
+        """Like run(), but hands every output line to on_line() while the program runs (for progress bars)."""
+        self.check()
+        err = tempfile.TemporaryFile()
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1, errors="replace")
 
-    def reader():
-        for line in p.stdout:
-            try:
-                on_line(line.strip())
-            except Exception:
-                pass
-    th = threading.Thread(target=reader, daemon=True)
-    th.start()
-    try:
-        while p.poll() is None:
-            time.sleep(0.2)
-            self.check()
-    finally:
-        with self.lock:
-            self.procs.discard(p)
-    th.join(timeout=3)
-    err.seek(0)
-    text = err.read().decode(errors="replace")
-    err.close()
-    if p.returncode != 0:
-        raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(map(str, cmd[:2]))}\n{text[-1500:]}")
-    return text
-
-
-Job.run_lines = _run_lines
+        def reader():
+            for line in p.stdout:
+                try:
+                    on_line(line.strip())
+                except Exception:
+                    pass
+        th = threading.Thread(target=reader, daemon=True)
+        th.start()
+        return self._wait(p, cmd, err, th)
 
 
 def probe(ffprobe, path):
