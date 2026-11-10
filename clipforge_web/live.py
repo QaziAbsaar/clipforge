@@ -18,10 +18,17 @@ TEST_FILES = os.environ.get("CLIPFORGE_TEST_SOURCES") == "1"   # lets tests play
 DEFAULT_CFG = dict(warmup=60.0, hi=0.55, lo=0.30, cooldown=40.0, lead=22.0, tail=10.0, buffer=1200.0, model="base")
 
 
+YOUTUBE = re.compile(r"^https?://(?:www\.|m\.)?(?:youtube\.com/(?:@[\w.-]+(?:/live)?|watch\?v=[\w-]+|live/[\w-]+|channel/[\w-]+/live)|youtu\.be/[\w-]+)")
+
+
 def parse_url(url):
+    y = YOUTUBE.match((url or "").strip())
+    if y:
+        name = re.search(r"@([\w.-]+)|v=([\w-]+)|live/([\w-]+)|channel/([\w-]+)|youtu\.be/([\w-]+)", url)
+        return "youtube", next(g for g in name.groups() if g)
     m = re.match(r"^https?://(?:www\.|m\.)?(twitch\.tv|kick\.com)/([A-Za-z0-9_]+)/?(?:\?.*)?$", (url or "").strip())
     if not m or m.group(2).lower() in NOT_CHANNELS:
-        raise ValueError("Paste a Twitch or Kick channel link, like https://www.twitch.tv/ishowspeed "
+        raise ValueError("Paste a Twitch, Kick or YouTube Live link, like https://www.twitch.tv/ishowspeed "
                          "(a recording or clip link belongs in 'Add video').")
     return ("twitch" if "twitch" in m.group(1) else "kick"), m.group(2)
 
@@ -83,7 +90,10 @@ class TwitchChat(threading.Thread):
 
 
 class NoChat:
-    connected, error = False, "Kick chat isn't supported yet, so only the sound is used."
+    connected = False
+
+    def __init__(self, platform="kick"):
+        self.error = f"{platform.title()} live chat isn't read yet, so only the sound and picture are used."
 
     def drain(self):
         return []
@@ -126,7 +136,7 @@ class Live:
 
     @staticmethod
     def _make_chat(platform, channel):
-        return TwitchChat(channel) if platform == "twitch" else NoChat()
+        return TwitchChat(channel) if platform == "twitch" else NoChat(platform)
 
     # ----- lifecycle -----
     def start(self):
