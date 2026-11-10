@@ -7,6 +7,7 @@ import wave
 import numpy as np
 
 _model = None
+_loaded = None                # (model, device, compute) of the loaded model
 _lock = threading.Lock()      # the web app and live mode may transcribe at the same time
 
 
@@ -18,11 +19,12 @@ def _load_wav(path):
 
 
 def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None):
-    global _model
+    global _model, _loaded
     with _lock:
-        if _model is None:
+        if _model is None or _loaded != (model, device, compute):   # reload when Settings change the accuracy
             from faster_whisper import WhisperModel
             _model = WhisperModel(model, device=device, compute_type=compute)
+            _loaded = (model, device, compute)
     audio = _load_wav(wav)
     total = max(len(audio) / 16000.0, 0.1)
     words = []
