@@ -367,7 +367,7 @@ class Live:
             reasons.append(f"Chat reaction: {chat:.0%} of a big burst.")
         db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
               "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created,src,stream_offset) "
-              "values(?,?,?,?,?,?,?,?,?,?,?,?,'stack',1080,0.5,?,'','',1,'candidate','none',?,?,?)",
+              "values(?,?,?,?,?,?,?,?,?,?,?,?,'pip',1080,0.5,?,'','',1,'candidate','none',?,?,?)",
               (self.id, s, e, rel_peak, 0.0, info["duration"], round(final, 4), db.dumps(comp), db.dumps(reasons),
                db.dumps(words), title, (client or {}).get("template") or "yellow_pop", (client or {}).get("music") or "",
                db.now(), out, offset))
