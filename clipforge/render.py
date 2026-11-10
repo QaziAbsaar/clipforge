@@ -43,8 +43,18 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
     dur = end - start
     tmp = os.path.dirname(os.path.abspath(ass_path))
     ass = os.path.basename(ass_path)  # relative name avoids Windows 'C:' escaping problems
-    cam = (track or {}).get("cam") if layout == "stack" else None
-    if layout == "stack" and cam and w / h > 9 / 16 + 0.01:
+    cam = (track or {}).get("cam") if layout in ("stack", "pip") else None
+    if layout == "pip" and cam and w / h > 9 / 16 + 0.01:
+        # gameplay fills the frame, facecam floats in a small box at the top centre
+        from .faces import PIP_SIZE, PIP_TOP
+        gw = int(h * 9 / 16) // 2 * 2
+        gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
+        cx, cy, cw_, ch_ = cam
+        pw = int(W * PIP_SIZE) // 2 * 2
+        fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{H}:flags=lanczos[bg];"
+              f"[a]crop={cw_}:{ch_}:{cx}:{cy},scale={pw}:-2:flags=lanczos[pip];"
+              f"[bg][pip]overlay=(W-w)/2:{int(H * PIP_TOP)},setsar=1,ass={ass}[v]")
+    elif layout == "stack" and cam and w / h > 9 / 16 + 0.01:
         # facecam on top, gameplay underneath: the standard gaming Shorts/Reels/TikTok layout
         from .faces import TOP_SHARE
         th = int(H * TOP_SHARE) // 2 * 2
@@ -54,7 +64,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         cx, cy, cw_, ch_ = cam
         fc = (f"[0:v]split[a][b];[a]crop={cw_}:{ch_}:{cx}:{cy},scale={W}:{th}:flags=lanczos[top];"
               f"[b]crop={gw}:{h}:{gx}:0,scale={W}:{bh}:flags=lanczos[bot];[top][bot]vstack,setsar=1,ass={ass}[v]")
-    elif layout in ("blur", "stack") or w / h <= 9 / 16 + 0.01:     # stack without a facecam: whole gameplay, blurred fill
+    elif layout in ("blur", "stack", "pip") or w / h <= 9 / 16 + 0.01:     # stack without a facecam: whole gameplay, blurred fill
         fc = (f"[0:v]split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
               f"boxblur=25:6[bg];[b]scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
               f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,ass={ass}[v]")

@@ -125,7 +125,8 @@ def write_sendcmd(pts, path, out_fps=30):
     return _even(xs[0])
 
 
-TOP_SHARE = 0.4          # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
+TOP_SHARE = 0.4
+PIP_SIZE, PIP_TOP = 0.5, 0.03          # facecam box width and top gap, as share of the frame          # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
 
 
 def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
