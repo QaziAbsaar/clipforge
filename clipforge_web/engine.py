@@ -98,6 +98,8 @@ def _reasons(peak, comp, words, hooks, wps, q_first, ai_info):
         r.append("AI editor: " + ai_info["reason"])
     if comp["audio"] >= 0.15:
         r.append(f"Loudness peak at {_mmss(peak)}: {comp['audio']:.0%} of the loudest moment in this video.")
+    if comp.get("motion") is not None and comp["motion"] >= 0.3:
+        r.append(f"Big on-screen action here: {comp['motion']:.0%} of the wildest moment.")
     if comp["heat"] is not None:
         r.append(f"YouTube 'most replayed' signal here: {comp['heat']:.0%}.")
     if comp["chat"] is not None:
@@ -166,7 +168,16 @@ def analyze_video(job, video_id, p):
     if os.path.exists(chat_file):
         with open(chat_file, encoding="utf-8", errors="ignore") as f:
             chat = analyze.chat_events_score(parse_chat_events(f.read()), len(a))
-    score = analyze.combine(a, heat, chat)
+    prog(video_id, 16, "Watching for big on-screen moments")
+    mcache = os.path.join(work, "motion_score.npy")
+    if os.path.exists(mcache):
+        motion = np.load(mcache)
+    else:
+        job.check()
+        motion = analyze.motion_score(ffmpeg, src, len(a))
+        if motion is not None:
+            np.save(mcache, motion)
+    score = analyze.combine(a, heat, chat, motion)
     k = max(1, len(score) // 400)
     curve = [round(float(score[i:i + k].max()), 3) for i in range(0, len(score), k)]
     db.ex("update videos set curve=? where id=?", (db.dumps({"step": k * analyze.FRAME, "v": curve}), video_id))
@@ -239,6 +250,7 @@ def analyze_video(job, video_id, p):
     for c in chosen:
         idx = min(int(c["peak"] / analyze.FRAME), len(a) - 1)
         comp = {"audio": float(a[idx]), "heat": None if heat is None else float(heat[idx]),
+                "motion": None if motion is None else float(motion[idx]),
                 "chat": None if chat is None else float(chat[idx]), "speech": float(c["text"]),
                 "ai": c["ai"]["score"] if c["ai"] else None}
         txt = " ".join(w["w"] for w in c["cw"]).lower()

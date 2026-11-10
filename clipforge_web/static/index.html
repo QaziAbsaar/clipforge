@@ -265,7 +265,7 @@ function drawCands(){
       <div class="rank">#${ranks.get(k.id)}</div>
       <div class="ring"><svg viewBox="0 0 52 52"><circle class="bg" cx="26" cy="26" r="21"/><circle class="fg" cx="26" cy="26" r="21" stroke="${scoreCol(k.score)}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-k.score)}"/></svg><b style="color:${scoreCol(k.score)}">${pct}</b></div>
       <div style="min-width:0"><div class="ti">${esc(k.title)}</div><div class="muted small">${fmt(k.start+(k.stream_offset||0))}–${fmt(k.end+(k.stream_offset||0))} · ${Math.round(k.end-k.start)}s ${stateBadge(k)}</div></div>
-      <div class="mini">${bar('Sound',sc.audio)}${bar('Speech',sc.speech)}${bar('Chat',sc.chat)}${bar('Replays',sc.heat)}${bar('AI',sc.ai)}</div>
+      <div class="mini">${bar('Sound',sc.audio)}${bar('Action',sc.motion)}${bar('Speech',sc.speech)}${bar('Chat',sc.chat)}${bar('Replays',sc.heat)}${bar('AI',sc.ai)}</div>
       ${(k.render_status==='running'||k.render_status==='queued')?`<div class="cprog"><i style="width:${Math.max(4,k.render_progress||0)}%"></i></div>`:''}`},'cand',
     (el,k)=>{el.classList.toggle('on',k.id===S.cid);el.classList.toggle('approved',k.status==='approved');el.classList.toggle('rejected',k.status==='rejected')});
 }

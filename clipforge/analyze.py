@@ -1,5 +1,7 @@
 """Stage 1: find exciting moments cheaply (no transcription): loudness spikes,
 YouTube 'most replayed' heatmap, optional chat-message timestamps."""
+import subprocess
+
 import numpy as np
 
 FRAME = 0.5  # seconds per analysis frame
@@ -88,8 +90,30 @@ def chat_events_score(events, n_frames):
     return np.pad(per_frame, (0, max(0, n_frames - len(per_frame))))
 
 
-def combine(audio, heat, chat):
+def motion_score(ffmpeg, src, n_frames):
+    """Big sudden picture changes (crashes, explosions, chaos). Decodes only keyframes at a tiny size, so even an
+    8-hour VOD takes a few minutes. Returns 0-1 per analysis frame, or None if nothing could be read."""
+    sw, sh = 64, 36
+    raw = subprocess.run([ffmpeg, "-v", "error", "-skip_frame", "nokey", "-i", src, "-an", "-vf",
+                          f"fps=1,scale={sw}:{sh},format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+    n = len(raw) // (sw * sh)
+    if n < 10:
+        return None
+    f = np.frombuffer(raw[: n * sw * sh], dtype=np.uint8).reshape(n, sw * sh).astype(np.float32)
+    d = np.concatenate([[0.0], np.abs(np.diff(f, axis=0)).mean(1)])
+    d = np.maximum(d, np.concatenate([[0.0], d[:-1]]))      # keyframes are ~2 s apart: fill the repeated seconds
+    base = np.array([np.median(d[max(0, i - 60):i + 61]) for i in range(n)])
+    spread = max(float(np.median(np.abs(d - base)) * 1.4826), 1.0)
+    z = np.clip((d - base) / spread, 0, None)
+    z = np.clip(_smooth(z, 3) / max(float(np.percentile(z, 99.5)), 1e-6), 0, 1)
+    per_frame = np.repeat(z, int(1 / FRAME))[:n_frames]
+    return np.pad(per_frame, (0, max(0, n_frames - len(per_frame))))
+
+
+def combine(audio, heat, chat, motion=None):
     parts = [(audio, 0.5)]
+    if motion is not None:
+        parts.append((motion, 0.15))
     if heat is not None:
         parts.append((heat, 0.3))
     if chat is not None:
