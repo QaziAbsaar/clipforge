@@ -33,3 +33,34 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
         with open(base + ".info.json", encoding="utf-8") as f:
             info = json.load(f)
     return base + ".mp4", info
+
+
+def youtube_chat(url, base, cookies_browser=None):
+    """Download a YouTube stream's chat replay (if it has one) and return [(seconds, message)]. Never raises."""
+    path = base + ".live_chat.json"
+    if not os.path.exists(path):
+        extra = ["--cookies-from-browser", cookies_browser] if cookies_browser else []
+        try:
+            subprocess.run([which("yt-dlp"), "--skip-download", "--write-subs", "--sub-langs", "live_chat",
+                            "--no-playlist", "-o", base + ".%(ext)s"] + extra + [url], capture_output=True, timeout=3600)
+        except Exception:
+            return []
+    if not os.path.exists(path):
+        return []
+    return parse_live_chat(path)
+
+
+def parse_live_chat(path):
+    out = []
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            try:
+                d = json.loads(line)["replayChatItemAction"]
+                t = int(d["videoOffsetTimeMsec"]) / 1000
+                for a in d["actions"]:
+                    r = a.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
+                    if r:
+                        out.append((t, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", []))))
+            except (KeyError, ValueError, TypeError):
+                continue
+    return out

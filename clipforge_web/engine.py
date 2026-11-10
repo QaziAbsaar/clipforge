@@ -5,7 +5,7 @@ import numpy as np
 from clipforge import ai, analyze, audiolib, captions, faces
 from clipforge.render import RES, render_clip
 from clipforge.segments import HOOK_WORDS, snap, text_score
-from clipforge.source import download
+from clipforge.source import download, youtube_chat
 from clipforge.transcribe import load_json, transcribe_file
 from clipforge.util import probe, which
 from . import db
@@ -50,6 +50,13 @@ def ingest(job, video_id, params):
                               params.get("cookies_browser") or None,
                               on_progress=lambda f: prog(video_id, f * 95, "Downloading the video"))
         title = (info or {}).get("title") or title
+        if "youtube.com" in v["source"] or "youtu.be" in v["source"]:
+            prog(video_id, 96, "Reading the chat replay")
+            events = youtube_chat(v["source"], os.path.splitext(path)[0], params.get("cookies_browser") or None)
+            if len(events) >= 20:
+                with open(os.path.join(wdir(video_id), "chat.txt"), "w", encoding="utf-8") as f:
+                    f.write("\n".join(f"{t:.2f} {m.replace(chr(10), ' ')}" for t, m in events))
+                job.log(f"Chat replay: {len(events)} messages.")
     else:
         path = v["path"]
     ffprobe = which("ffprobe")
