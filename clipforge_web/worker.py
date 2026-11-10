@@ -1,4 +1,5 @@
-"""Runs the heavy work (import, find clips, render) one task at a time in the background.
+"""Runs the heavy work (import, find clips, render) in the background, WORKERS tasks at a time
+(CLIPFORGE_WORKERS, default 3), so several videos can be clipped together.
 Renders go first, so an approved clip never waits behind a long analysis.
 There is no queue screen: each video or clip shows its own progress."""
 import json, os, threading, time, traceback
@@ -6,6 +7,8 @@ import json, os, threading, time, traceback
 from clipforge.util import Cancelled, Job
 from . import db, engine
 
+WORKERS = max(1, int(os.environ.get("CLIPFORGE_WORKERS", "3")))
+_claim = threading.Lock()
 FUNCS = {"ingest": engine.ingest, "analyze": engine.analyze_video, "render": engine.render}
 
 
@@ -29,21 +32,26 @@ def _fail(row, msg, cancelled=False):
           ("ready" if _usable(v) else "error", msg[:500], row["ref_id"]))
 
 
+def _next():
+    """Claim the next waiting task, skipping any whose video (or clip) already has a task running."""
+    with _claim:
+        row = db.q("select * from jobs j where status='queued' and not exists (select 1 from jobs r where "
+                   "r.status='running' and r.ref_id=j.ref_id and (r.type='render')=(j.type='render')) "
+                   "order by type='render' desc, id limit 1", one=True)
+        if row:
+            db.ex("update jobs set status='running', started=? where id=?", (db.now(), row["id"]))
+        return row
+
+
 def _loop():
-    db.ex("update jobs set status='failed', error='Interrupted (app was closed)' where status='running'")
-    for v in db.q("select id,path,duration from videos where status in ('importing','analyzing')"):
-        db.ex("update videos set status=?, error='Interrupted when the app was closed. Try again.', progress=0, stage='' "
-              "where id=?", ("ready" if _usable(v) else "error", v["id"]))
-    db.ex("update clips set render_status='none', render_progress=0 where render_status in ('queued','running')")
     while True:
-        row = db.q("select * from jobs where status='queued' order by type='render' desc, id limit 1", one=True)
+        row = _next()
         if not row:
             time.sleep(0.4)
             continue
         sf = stop_file(row["id"])
         if os.path.exists(sf):
             os.remove(sf)
-        db.ex("update jobs set status='running', started=? where id=?", (db.now(), row["id"]))
         if row["type"] == "render":
             db.ex("update clips set render_status='running' where id=?", (row["ref_id"],))
         job = Job(stop_file=sf, log=lambda m, jid=row["id"]: db.ex(
@@ -71,7 +79,13 @@ def _loop():
 
 
 def start():
-    threading.Thread(target=_loop, daemon=True).start()
+    db.ex("update jobs set status='failed', error='Interrupted (app was closed)' where status='running'")
+    for v in db.q("select id,path,duration from videos where status in ('importing','analyzing')"):
+        db.ex("update videos set status=?, error='Interrupted when the app was closed. Try again.', progress=0, stage='' "
+              "where id=?", ("ready" if _usable(v) else "error", v["id"]))
+    db.ex("update clips set render_status='none', render_progress=0 where render_status in ('queued','running')")
+    for _ in range(WORKERS):
+        threading.Thread(target=_loop, daemon=True).start()
 
 
 def enqueue(type_, ref_id, params=None):
