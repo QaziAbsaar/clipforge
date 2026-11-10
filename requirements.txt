@@ -1,0 +1,8 @@
+numpy
+faster-whisper
+yt-dlp
+streamlink
+opencv-python-headless<5
+fastapi
+uvicorn
+python-multipart
