@@ -21,6 +21,9 @@ A yellow bar at the top tells you if something is missing.
   (The first time, the browser may ask to allow multiple downloads - say yes.)
 - Go live: paste a Twitch, Kick or YouTube Live link. ClipForge records it, watches the sound and (Twitch) chat,
   and cuts a clip whenever something big happens. "Clip it now" cuts the last moments by hand.
+- Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
+  starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
+  it stopped until that channel goes offline. At most 6 recordings run at once (set CLIPFORGE_MAX_LIVE to change it).
 
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
@@ -37,3 +40,6 @@ server with a domain (Caddy gives HTTPS). Live Kick clipping needs a desktop bro
 
 ## Faster on a gaming PC
 Set CLIPFORGE_DEVICE=cuda to transcribe on an NVIDIA GPU (much faster when several streams run at once).
+
+## Tests
+python tests/test_live_watch.py (needs FFmpeg, no internet).
