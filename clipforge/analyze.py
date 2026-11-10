@@ -59,7 +59,10 @@ def chat_score(stamps, n_frames):
 
 
 CHAT_HYPE = ("clip", "clip it", "clip that", "no way", "nowaaay", "omg", "wtf", "lol", "lmao", "lmfao", "kek", "w ",
-             "pog", "poggers", "holy", "insane", "crazy", "bro", "what", "wild", "dead", "cooked", "\U0001F602", "\U0001F480")
+             "pog", "poggers", "holy", "insane", "crazy", "bro", "what", "wild", "dead", "cooked", "\U0001F602", "\U0001F480",
+             # Twitch/Kick emotes and GTA chat
+             "kekw", "omegalul", "lulw", "icant", "clap", "pogchamp", "pepelaugh", "monkas", "sheesh", "wasted",
+             "busted", "glitch", "cops", "5 star", "heist", "gta", "+2", "\U0001F525", "\U0001F631")
 
 
 def chat_events_score(events, n_frames):

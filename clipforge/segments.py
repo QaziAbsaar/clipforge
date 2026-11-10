@@ -2,7 +2,11 @@
 import math
 
 HOOK_WORDS = ["no way", "what the", "oh my", "crazy", "insane", "bro", "dude", "wait", "bruh", "omg",
-              "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo"]
+              "wtf", "nah", "stop", "scream", "never", "can't believe", "unbelievable", "let's go", "yo",
+              # GTA / gaming reactions
+              "wasted", "busted", "oh no", "get out", "the cops", "five stars", "5 stars", "glitch", "crashed",
+              "exploded", "what just happened", "are you serious", "no no no", "oh my god", "run run", "go go go",
+              "i'm dead", "we're dead", "clip that", "let him cook"]
 SENT = (".", "?", "!")
 
 
