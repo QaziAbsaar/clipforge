@@ -1,11 +1,13 @@
 """Word-level transcription with faster-whisper. Output schema (relative to the wav start):
 {"words": [{"w": "hello", "start": 0.12, "end": 0.40}, ...]}"""
 import json
+import os
 import threading
 import wave
 
 import numpy as np
 
+DEVICE = os.environ.get("CLIPFORGE_DEVICE", "")   # "cuda" = NVIDIA GPU, much faster when many streams run
 _model = None
 _loaded = None                # (model, device, compute) of the loaded model
 _lock = threading.Lock()      # the web app and live mode may transcribe at the same time
@@ -20,6 +22,8 @@ def _load_wav(path):
 
 def transcribe_file(wav, model="small", device="cpu", compute="int8", language=None, on_progress=None):
     global _model, _loaded
+    if DEVICE:
+        device, compute = DEVICE, ("int8" if DEVICE == "cpu" else "float16")
     with _lock:
         if _model is None or _loaded != (model, device, compute):   # reload when Settings change the accuracy
             from faster_whisper import WhisperModel
