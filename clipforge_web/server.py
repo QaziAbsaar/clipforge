@@ -241,7 +241,8 @@ def add_links(body: dict = Body(...)):
             raise HTTPException(400, f"That isn't a web link: {u[:60]}")
         vid = db.ex("insert into videos(title,source,status,created,client_id,kind,stage) values(?,?,?,?,?,?,?)",
                     (u, u, "importing", db.now(), body.get("client_id"), "link", "Getting your video"))
-        worker.enqueue("ingest", vid, {"max_height": body.get("max_height", 1080), "cookies_browser": body.get("cookies_browser"),
+        worker.enqueue("ingest", vid, {"max_height": body.get("max_height", 1080), "quick": bool(body.get("quick")),
+                                       "cookies_browser": body.get("cookies_browser"),
                                        "then_analyze": _then(body)})
         ids.append(vid)
     return {"ids": ids}
