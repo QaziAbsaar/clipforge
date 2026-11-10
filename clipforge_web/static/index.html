@@ -45,6 +45,12 @@
       <h2>Go live</h2>
       <input id="liveUrl" placeholder="twitch.tv/…, kick.com/… or youtube.com/@…/live">
       <button id="liveStart" class="primary" style="width:100%">Start clipping the stream</button>
+      <details id="watchBox"><summary class="muted small" style="cursor:pointer">Watch list: record channels when they go live</summary>
+        <div class="stack" style="margin-top:8px">
+          <textarea id="watchUrls" placeholder="One channel link per line"></textarea>
+          <button id="watchSave">Save watch list</button>
+          <div id="watchStat" class="small"></div>
+        </div></details>
       <p class="muted small" style="margin:0">Only post clips you have the right to use: your own streams, streamers who hired you, or clips you change a lot. Reposting other people's streams can get copyright strikes.</p>
     </div>
 
@@ -143,6 +149,17 @@ function uploadFile(f){
 }
 function drawUploads(){$('#uploads').innerHTML=S.uploads.map(u=>`<div class="small" style="margin-top:4px">${esc(u.name)} ${u.err?'<span style="color:var(--low)">'+esc(u.err)+'</span>':u.pct+'%'}${u.err?'':'<div class="bar"><i style="width:'+u.pct+'%"></i></div>'}</div>`).join('')}
 $('#liveStart').onclick=guard(async()=>{const r=await send('POST','/api/live',{url:$('#liveUrl').value,client_id:S.client});$('#liveUrl').value='';await tick();selectVideo(r.id)});
+
+let watchLoaded=false;
+async function pollWatch(){
+  if(!$('#watchBox').open)return;
+  const w=await api('/api/watch');
+  if(!watchLoaded){$('#watchUrls').value=w.urls.join('\n');watchLoaded=true}
+  $('#watchStat').innerHTML=w.urls.length?w.urls.map(u=>`<div><b>${esc(u.replace(/^https?:\/\/(www\.)?/,''))}</b> <span class="muted">${esc(w.status[u])}</span></div>`).join('')+
+    `<p class="muted" style="margin:6px 0 0">Checked every ${w.every}s. Up to ${w.max} recordings at once. Keep ClipForge open.</p>`:'<p class="muted" style="margin:0">Add channel links to record them automatically.</p>';
+}
+$('#watchBox').ontoggle=guard(pollWatch);
+$('#watchSave').onclick=guard(async()=>{await send('POST','/api/watch',{urls:$('#watchUrls').value});watchLoaded=false;await pollWatch();toast('Watch list saved.')});
 
 /* ---------------- videos rail ---------------- */
 function drawRail(){
@@ -430,7 +447,7 @@ async function tick(){
   try{
     S.videos=await api('/api/videos');
     if(S.vid){const v=S.videos.find(x=>x.id===S.vid);if(v){S.video=v;await loadClips()}else{S.vid=null;S.video=null;S.clips=[];S.mstate=''}}
-    drawRail();updateMain();pollLive();
+    drawRail();updateMain();pollLive();pollWatch();
   }catch(e){}finally{busyTick=false}
 }
 (async()=>{
