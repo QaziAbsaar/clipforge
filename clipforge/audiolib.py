@@ -17,11 +17,10 @@ def list_files(kind):
 
 
 def resolve(kind, name):
-    """name = file name in the library, a full path, or 'random' (music only)."""
-    if not name or name in ("(none)", "none"):
+    """name = a file name inside the library folder, or 'random' (music only). Paths are refused, so nobody can
+    point FFmpeg at other files on the computer."""
+    if not name or name in ("(none)", "none") or name != os.path.basename(name) or name.startswith("."):
         return None
-    if os.path.isfile(name):
-        return name
     if name == "random" and kind == "music":
         files = list_files("music")
         return os.path.join(folder("music"), random.choice(files)) if files else None
