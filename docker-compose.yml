@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      CLIPFORGE_PASSWORD: ${CLIPFORGE_PASSWORD:?Set CLIPFORGE_PASSWORD in the .env file}
+    volumes:
+      - clipforge-data:/data
+      - ./audio_library:/app/audio_library
+    expose:
+      - "8000"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in the .env file}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+volumes:
+  clipforge-data:
+  caddy-data:
+  caddy-config:
