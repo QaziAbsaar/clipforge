@@ -1,4 +1,5 @@
 """Runs the heavy work (import, find clips, render) one task at a time in the background.
+Renders go first, so an approved clip never waits behind a long analysis.
 There is no queue screen: each video or clip shows its own progress."""
 import json, os, threading, time, traceback
 
@@ -35,7 +36,7 @@ def _loop():
               "where id=?", ("ready" if _usable(v) else "error", v["id"]))
     db.ex("update clips set render_status='none', render_progress=0 where render_status in ('queued','running')")
     while True:
-        row = db.q("select * from jobs where status='queued' order by id limit 1", one=True)
+        row = db.q("select * from jobs where status='queued' order by type='render' desc, id limit 1", one=True)
         if not row:
             time.sleep(0.4)
             continue
