@@ -329,7 +329,7 @@ def get_cam(job, clip, video):
     """Facecam box for the stacked layout (cached until the clip's start or end changes)."""
     if clip["cam"]:
         c = json.loads(clip["cam"])
-        if abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
+        if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
             return c
     if job:
         job.check()
@@ -345,7 +345,7 @@ def framing(clip, video):
         c = get_cam(None, clip, video)
         if c["kind"] != "camera":
             return {"stack": True, "pip": clip["layout"] == "pip", "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
-                    "kind": c["kind"], "cam": c["cam"], "w": video["w"], "h": video["h"],
+                    "kind": c["kind"], "cam": c["cam"], "box": c["box"], "w": video["w"], "h": video["h"],
                     "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": []}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
@@ -383,7 +383,7 @@ def render(job, clip_id, p):
         if cam["kind"] == "camera":
             layout = "follow"
         else:
-            track = {"cam": cam["cam"]}
+            track = {"cam": cam["cam"], "box": cam["box"]}
     if layout == "follow" and wide:
         track = get_track(job, c, v)
         job.log(f"Face found in {track['found']:.0%} of the clip.")

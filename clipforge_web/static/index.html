@@ -383,6 +383,7 @@ function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;
 function drawStack(v,f,c){
   const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height,th=Math.round(H*f.top),bh=H-th;
   if(!v.videoWidth)return;const k=v.videoWidth/f.w,[x,y,w,h]=f.cam.map(n=>n*k);
+  if(f.pip&&f.box)[x,y,w,h]=f.box.map(n=>n*k);
   if(f.pip){const vh=v.videoHeight,gw=vh*9/16,gx=(v.videoWidth-gw)*c.crop_x,pw=W*f.size,ph=pw*h/w;
     g.drawImage(v,gx,0,gw,vh,0,0,W,H);g.drawImage(v,x,y,w,h,(W-pw)/2,H*f.ptop,pw,ph);return}
   const vh=v.videoHeight,gw=Math.min(v.videoWidth,vh*W/bh),gx=(v.videoWidth-gw)*c.crop_x;
