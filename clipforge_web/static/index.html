@@ -302,10 +302,10 @@ async function selectClip(id){
 async function loadCues(){S.cues=await api('/api/clips/'+S.cid+'/cues')}
 async function loadFraming(){
   const id=S.cid,hint=$('#facehint');
-  if(!S.clip||S.clip.layout!=='follow'){if(hint)hint.hidden=true;S.framing=null;applyLayout();return}
+  if(!S.clip||!['follow','stack'].includes(S.clip.layout)){if(hint)hint.hidden=true;S.framing=null;applyLayout();return}
   if(hint){hint.hidden=false;hint.innerHTML='<span class="spin"></span>Finding the face'}
   try{const f=await api('/api/clips/'+id+'/framing');if(S.cid!==id)return;S.framing=f;
-    if(hint){hint.innerHTML=f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
+    if(hint){hint.innerHTML=f.stack?(f.cam?'Facecam on top, gameplay below':'No facecam found, showing the whole gameplay'):f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
   catch(e){if(hint)hint.hidden=true;toast(e.message,true)}
   applyLayout();
 }
@@ -317,11 +317,11 @@ function buildEditor(){
   const c=S.clip,el=$('#editor');
   el.innerHTML=`<div class="ed"><div class="edbody stack">
    <div class="row"><h2 style="flex:1">Edit clip</h2><button id="close" class="ghost" aria-label="Close editor">✕</button></div>
-   <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
+   <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><canvas id="stackcv" width="270" height="480" hidden></canvas><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
    <div class="row"><button id="play">Play</button><label style="margin:0" class="fit"><input type="checkbox" id="loop" checked> Loop</label><label style="margin:0" class="fit"><input type="checkbox" id="snd"> Sound</label></div>
    <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
-   <div><label>Framing</label><div class="seg" id="layout"><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
-     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${c.layout==='crop'?'':'hidden'} aria-label="Crop position"></div>
+   <div><label>Framing</label><div class="seg" id="layout"><button data-l="stack">Facecam + gameplay</button><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
+     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${c.layout==='crop'||c.layout==='stack'?'':'hidden'} aria-label="Crop position"></div>
    <div><label>Caption style</label><div class="styles" id="tpls"></div>
      <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
    <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
@@ -348,7 +348,7 @@ function buildEditor(){
   $('#st').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));$('#en').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));
   $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));$('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
   el.querySelectorAll('[data-n]').forEach(b=>b.onclick=guard(()=>{const [k,d]=b.dataset.n.split(':');k==='st'?setTimes(S.clip.start+ +d,S.clip.end):setTimes(S.clip.start,S.clip.end+ +d)}));
-  $('#layout').onclick=guard(async e=>{const b=e.target.closest('[data-l]');if(!b)return;await save({layout:b.dataset.l});$('#cx').hidden=S.clip.layout!=='crop';markSeg();loadFraming()});
+  $('#layout').onclick=guard(async e=>{const b=e.target.closest('[data-l]');if(!b)return;await save({layout:b.dataset.l});$('#cx').hidden=!['crop','stack'].includes(S.clip.layout);markSeg();loadFraming()});
   $('#res').onclick=guard(async e=>{const b=e.target.closest('[data-r]');if(!b)return;await save({res:+b.dataset.r});markSeg()});
   $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
   $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});
@@ -362,8 +362,15 @@ async function setTimes(s,e){await save({start:s,end:e});$('#st').value=S.clip.s
 function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;let lo=0,hi=p.length-1;
   while(hi-lo>1){const m=(lo+hi)>>1;p[m][0]<=t?lo=m:hi=m}
   const a=p[lo],b=p[hi];if(t<=a[0])return a[1];if(t>=b[0])return b[1];return a[1]+(b[1]-a[1])*(t-a[0])/Math.max(b[0]-a[0],1e-6)}
-function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip;
-  v.style.objectFit=c.layout==='blur'?'contain':'cover';
+function drawStack(v,f,c){
+  const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height,th=Math.round(H*f.top),bh=H-th;
+  if(!v.videoWidth)return;const k=v.videoWidth/f.w,[x,y,w,h]=f.cam.map(n=>n*k);
+  const vh=v.videoHeight,gw=Math.min(v.videoWidth,vh*W/bh),gx=(v.videoWidth-gw)*c.crop_x;
+  g.drawImage(v,x,y,w,h,0,0,W,th);g.drawImage(v,gx,0,gw,vh,0,th,W,bh)}
+function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
+  const stack=c.layout==='stack'&&f&&f.stack&&f.cam,cv=$('#stackcv');
+  cv.hidden=!stack;v.style.visibility=stack?'hidden':'';if(stack)drawStack(v,f,c);
+  v.style.objectFit=(c.layout==='blur'||(c.layout==='stack'&&f&&f.stack&&!f.cam))?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
   v.style.objectPosition=(x*100)+'% 50%'}
 function sizePhone(){const p=$('#phone');if(p)p.style.setProperty('--w',Math.min(236,$('#editor').clientWidth-80)+'px')}

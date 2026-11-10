@@ -144,3 +144,5 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
 #toast.err{border-color:var(--low);color:#ffd0d6}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 @media (max-width:1100px){body{display:block}#app,#app.noedit{display:block}aside,main,#editor{overflow:visible;border:0}#app.noedit #editor{display:none}.hero{margin-top:4vh}}
+
+#stackcv{position:absolute;inset:0;width:100%;height:100%}
