@@ -268,7 +268,7 @@ def analyze_video(job, video_id, p):
                                                   if c["cw"] else "Untitled clip")[:70]
         db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
               "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created) "
-              "values(?,?,?,?,?,?,?,?,?,?,?,?,'stack',1080,0.5,?,'','',1,'candidate','none',?)",
+              "values(?,?,?,?,?,?,?,?,?,?,?,?,'pip',1080,0.5,?,'','',1,'candidate','none',?)",
               (video_id, c["s"], c["e"], c["peak"], c["ws"], c["we"], round(c["final"], 4), db.dumps(comp),
                db.dumps(_reasons(c["peak"], comp, c["cw"], hooks, wps, "?" in first, c["ai"])),
                db.dumps(c["words"]), title, tpl_default, music_default, db.now()))
@@ -341,10 +341,11 @@ def get_cam(job, clip, video):
 
 def framing(clip, video):
     """What the browser preview needs to mimic the face-following crop or the stacked layout."""
-    if clip["layout"] == "stack":
+    if clip["layout"] in ("stack", "pip"):
         c = get_cam(None, clip, video)
         if c["kind"] != "camera":
-            return {"stack": True, "kind": c["kind"], "cam": c["cam"], "w": video["w"], "h": video["h"],
+            return {"stack": True, "pip": clip["layout"] == "pip", "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
+                    "kind": c["kind"], "cam": c["cam"], "w": video["w"], "h": video["h"],
                     "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": []}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
@@ -375,9 +376,9 @@ def render(job, clip_id, p):
     setp(0.01)
     track, layout = None, c["layout"]
     wide = v["w"] / v["h"] > 9 / 16 + 0.01
-    if layout == "stack" and wide:
+    if layout in ("stack", "pip") and wide:
         cam = get_cam(job, c, v)
-        job.log({"facecam": "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
+        job.log({"facecam": "Facecam found: placed over the gameplay." if layout == "pip" else "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
                  "none": "No facecam: showing the whole gameplay."}[cam["kind"]])
         if cam["kind"] == "camera":
             layout = "follow"
