@@ -25,6 +25,9 @@ A yellow bar at the top tells you if something is missing.
 - Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
   starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
   it stopped until that channel goes offline. At most 6 recordings run at once (set CLIPFORGE_MAX_LIVE to change it).
+- Quick links (default): only a small 360p copy is downloaded to find the clips; each approved clip is then
+  fetched in full quality on its own (about 20 MB instead of GBs for a long stream). Pick "Full 1080p" to download
+  the whole video instead. If the link stops working, the clip is made from the quick copy.
 - Several videos are clipped at the same time: 3 tasks (download, find clips, render) run at once. Set
   CLIPFORGE_WORKERS to change it. Speech-to-text still runs one video at a time to keep the computer responsive.
 
