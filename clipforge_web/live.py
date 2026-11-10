@@ -1,7 +1,7 @@
 """Live-stream clipping. Records a Twitch/Kick stream in short pieces, watches the sound and the chat in real
 time, and cuts a clip whenever something big happens. Honest limits: Twitch chat is read live; Kick chat is not
 supported (sound only); platforms have no "likes" on a live stream, so chat bursts and crowd noise stand in."""
-import collections, csv, os, queue, random, re, socket, ssl, subprocess, tempfile, threading, time, traceback
+import collections, csv, json, os, queue, random, re, socket, ssl, subprocess, tempfile, threading, time, traceback
 import numpy as np
 
 from clipforge import analyze
@@ -409,6 +409,8 @@ def get(vid):
 def stop(vid):
     s = SESSIONS.get(vid)
     if s:
+        if s.url in watch_list():                              # don't let the watch list restart what you stopped
+            _paused.add(s.url)
         s.stop()
         for _ in range(60):                                    # let pending clips finish
             if s.state in ("stopped", "error") and s.pending.empty() and not s.busy:
@@ -418,3 +420,79 @@ def stop(vid):
     if v and v["status"] == "live":
         db.ex("update videos set status='ready', stage='', progress=100 where id=?", (vid,))
 
+
+# ---------------- watch list: record channels automatically when they go live ----------------
+WATCH_EVERY = 60                                               # seconds between checks
+MAX_LIVE = int(os.environ.get("CLIPFORGE_MAX_LIVE", "6"))      # each recording costs CPU; raise it on a strong PC
+WATCH = {}                                                     # url -> status text for the page
+_paused = set()
+
+
+def watch_list():
+    return [u.strip() for u in db.setting("watch", "").splitlines() if u.strip()]
+
+
+def set_watch_list(text):
+    urls = []
+    for u in str(text).splitlines():
+        u = u.strip()
+        if u and u not in urls:
+            parse_url(u)                                       # ValueError with a clear message if it isn't a channel
+            urls.append(u)
+    db.set_setting("watch", "\n".join(urls))
+    for u in list(WATCH):
+        if u not in urls:
+            WATCH.pop(u, None)
+            _paused.discard(u)
+    return urls
+
+
+def is_live(url):
+    r = subprocess.run([which("streamlink"), "--json", url], capture_output=True, text=True, timeout=120)
+    try:
+        return bool(json.loads(r.stdout).get("streams"))
+    except ValueError:
+        return False
+
+
+def _active(url):
+    return any(s.url == url and not s.stopped for s in SESSIONS.values())
+
+
+def check_watch_list(live_check=is_live, starter=None):
+    starter = starter or start
+    for url in watch_list():
+        if _active(url):
+            WATCH[url] = "Recording"
+            continue
+        try:
+            on = live_check(url)
+        except Exception as e:
+            WATCH[url] = f"Couldn't check ({str(e)[:60]})"
+            continue
+        if not on:
+            _paused.discard(url)
+            WATCH[url] = "Offline"
+        elif url in _paused:
+            WATCH[url] = "Live, but you stopped it"
+        elif sum(1 for s in SESSIONS.values() if not s.stopped) >= MAX_LIVE:
+            WATCH[url] = f"Live, waiting: {MAX_LIVE} recordings already running"
+        else:
+            try:
+                starter(url)
+                WATCH[url] = "Recording"
+            except Exception as e:
+                WATCH[url] = f"Couldn't start ({str(e)[:80]})"
+
+
+def _watch_loop():
+    while True:
+        try:
+            check_watch_list()
+        except Exception:
+            traceback.print_exc()
+        time.sleep(WATCH_EVERY)
+
+
+def start_watcher():
+    threading.Thread(target=_watch_loop, daemon=True).start()
