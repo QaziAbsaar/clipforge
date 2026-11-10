@@ -18,7 +18,7 @@ create table if not exists clips(
   score real, scores text, reasons text, words text, title text,
   template text, layout text, res integer, crop_x real, music text, sfx_intro text, sfx_peak text,
   captions integer, status text, render_status text, render_path text, created real,
-  render_progress real default 0, src text, track text, downloaded integer default 0, stream_offset real default 0);
+  render_progress real default 0, src text, track text, downloaded integer default 0, stream_offset real default 0, cam text);
 create table if not exists jobs(
   id integer primary key, type text, ref_id integer, params text, status text,
   log text default '', error text, created real, started real, finished real);
@@ -27,7 +27,7 @@ create table if not exists settings(key text primary key, value text);
 
 MIGRATE = {
     "videos": [("client_id", "integer"), ("kind", "text"), ("progress", "real default 0"), ("stage", "text default ''")],
-    "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0")],
+    "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0"), ("cam", "text")],
 }
 
 

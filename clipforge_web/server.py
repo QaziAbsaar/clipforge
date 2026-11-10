@@ -360,7 +360,7 @@ def _clip(cid):
 
 
 def _clip_out(c):
-    o = {k: v for k, v in c.items() if k not in ("words", "render_path", "track", "src")}
+    o = {k: v for k, v in c.items() if k not in ("words", "render_path", "track", "src", "cam")}
     o["scores"] = json.loads(c["scores"] or "{}")
     o["reasons"] = json.loads(c["reasons"] or "[]")
     o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
@@ -388,8 +388,8 @@ def patch_clip(cid: int, body: dict = Body(...)):
             raise HTTPException(400, f"Can't change '{k}'.")
         if k == "template" and val not in TEMPLATES:
             raise HTTPException(400, "Unknown caption style.")
-        if k == "layout" and val not in ("follow", "crop", "blur"):
-            raise HTTPException(400, "Framing must be follow, crop or blur.")
+        if k == "layout" and val not in ("stack", "follow", "crop", "blur"):
+            raise HTTPException(400, "Framing must be stack, follow, crop or blur.")
         if k == "res" and int(val) not in RES:
             raise HTTPException(400, "Resolution must be 1080, 1440 (2K) or 2160 (4K).")
         if k == "status" and val not in ("candidate", "approved", "rejected"):

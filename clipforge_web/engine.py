@@ -306,8 +306,27 @@ def get_track(job, clip, video):
     return t
 
 
+def get_cam(job, clip, video):
+    """Facecam box for the stacked layout (cached until the clip's start or end changes)."""
+    if clip["cam"]:
+        c = json.loads(clip["cam"])
+        if abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
+            return c
+    if job:
+        job.check()
+    c = faces.find_facecam(which("ffmpeg"), clip_source(clip, video), video["w"], video["h"], clip["start"], clip["end"])
+    c["start"], c["end"] = clip["start"], clip["end"]
+    db.ex("update clips set cam=? where id=?", (db.dumps(c), clip["id"]))
+    return c
+
+
 def framing(clip, video):
-    """What the browser preview needs to mimic the face-following crop."""
+    """What the browser preview needs to mimic the face-following crop or the stacked layout."""
+    if clip["layout"] == "stack":
+        c = get_cam(None, clip, video)
+        if c["kind"] != "camera":
+            return {"stack": True, "kind": c["kind"], "cam": c["cam"], "w": video["w"], "h": video["h"],
+                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": []}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
     return {"found": t["found"], "cw": t["cw"], "w": video["w"], "h": video["h"],
@@ -335,8 +354,17 @@ def render(job, clip_id, p):
             last["p"] = pct
             db.ex("update clips set render_progress=? where id=?", (pct, clip_id))
     setp(0.01)
-    track = None
-    if c["layout"] == "follow" and v["w"] / v["h"] > 9 / 16 + 0.01:
+    track, layout = None, c["layout"]
+    wide = v["w"] / v["h"] > 9 / 16 + 0.01
+    if layout == "stack" and wide:
+        cam = get_cam(job, c, v)
+        job.log({"facecam": "Facecam found: stacked above the gameplay.", "camera": "Full camera shot: following the face.",
+                 "none": "No facecam: showing the whole gameplay."}[cam["kind"]])
+        if cam["kind"] == "camera":
+            layout = "follow"
+        else:
+            track = {"cam": cam["cam"]}
+    if layout == "follow" and wide:
         track = get_track(job, c, v)
         job.log(f"Face found in {track['found']:.0%} of the clip.")
     setp(0.12)
@@ -347,7 +375,7 @@ def render(job, clip_id, p):
         sfx.append((path, 0.0, 0.7))
     music = audiolib.resolve("music", c["music"])
     job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
-    render_clip(job, ffmpeg, clip_source(c, v), info, c["start"], c["end"], ass, out, c["layout"], c["crop_x"],
+    render_clip(job, ffmpeg, clip_source(c, v), info, c["start"], c["end"], ass, out, layout, c["crop_x"],
                 res=c["res"], music=music, music_vol=0.18, duck=True, sfx=sfx, track=track,
                 on_progress=lambda f: setp(0.12 + 0.88 * f))
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))
