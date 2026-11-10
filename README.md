@@ -12,7 +12,8 @@ A yellow bar at the top tells you if something is missing.
 - Up to 100 ranked clips per video, each with a score, the reason, a title and word-by-word captions.
   Rule of thumb: a 20-minute video fits about 100 clips at ~12 seconds each.
 - Vertical 9:16 output for Facebook Reels, YouTube Shorts and TikTok (1080x1920 by default).
-- Gaming layout (default): the streamer's facecam on top, gameplay underneath. With no facecam the whole gameplay is
+- Gaming layout (default): gameplay fills the frame and the streamer's facecam sits in a small box at the top centre.
+  "Facecam + gameplay split" puts the facecam in the top 40% instead. With no facecam the whole gameplay is
   shown over a blurred fill; with a full camera shot the crop follows the face.
 - Finds big on-screen action (crashes, explosions) from picture changes, plus GTA and gaming words in speech and chat.
 - YouTube links: the chat replay is downloaded automatically and used as a signal.
