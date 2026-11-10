@@ -249,7 +249,7 @@ def analyze_video(job, video_id, p):
                                                   if c["cw"] else "Untitled clip")[:70]
         db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
               "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created) "
-              "values(?,?,?,?,?,?,?,?,?,?,?,?,'follow',1440,0.5,?,'','',1,'candidate','none',?)",
+              "values(?,?,?,?,?,?,?,?,?,?,?,?,'follow',1080,0.5,?,'','',1,'candidate','none',?)",
               (video_id, c["s"], c["e"], c["peak"], c["ws"], c["we"], round(c["final"], 4), db.dumps(comp),
                db.dumps(_reasons(c["peak"], comp, c["cw"], hooks, wps, "?" in first, c["ai"])),
                db.dumps(c["words"]), title, tpl_default, music_default, db.now()))
