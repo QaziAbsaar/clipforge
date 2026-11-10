@@ -123,3 +123,32 @@ def write_sendcmd(pts, path, out_fps=30):
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
     return _even(xs[0])
+
+
+TOP_SHARE = 0.4          # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
+
+
+def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
+    """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'kind': ...} in source px.
+    kind 'facecam' = small steady face (overlay), 'camera' = big face (talking head, use follow instead), 'none'."""
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1)
+    det = _detector()
+    hits = []
+    for g in frames:
+        min_face = max(16, int(g.shape[1] * 0.025))
+        faces = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
+        if len(faces):
+            x, y, w, h = max(faces, key=lambda f: f[2])
+            hits.append(((x + w / 2) / scale, (y + h / 2) / scale, w / scale))
+    if len(frames) == 0 or len(hits) < max(2, 0.3 * len(frames)):
+        return {"cam": None, "kind": "none"}
+    cx, cy, fw = (float(np.median([h[i] for h in hits])) for i in range(3))
+    if fw > 0.22 * W:
+        return {"cam": None, "kind": "camera"}
+    aspect = out_w / (out_h * TOP_SHARE)                   # shape of the top panel
+    cw = min(fw * 3.6, W * 0.5)
+    ch = min(cw / aspect, H)
+    cw = ch * aspect
+    x = min(max(cx - cw / 2, 0), W - cw)
+    y = min(max(cy - ch * 0.45, 0), H - ch)                # face a little above the panel centre
+    return {"cam": [_even(x), _even(y), _even(cw), _even(ch)], "kind": "facecam"}
