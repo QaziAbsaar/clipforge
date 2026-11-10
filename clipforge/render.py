@@ -49,7 +49,7 @@ def render_clip(job, ffmpeg, src, info, start, end, ass_path, out_path, layout="
         from .faces import PIP_SIZE, PIP_TOP
         gw = int(h * 9 / 16) // 2 * 2
         gx = int((w - gw) * min(max(crop_x, 0), 1)) // 2 * 2
-        cx, cy, cw_, ch_ = cam
+        cx, cy, cw_, ch_ = track.get("box") or cam
         pw = int(W * PIP_SIZE) // 2 * 2
         fc = (f"[0:v]split[a][b];[b]crop={gw}:{h}:{gx}:0,scale={W}:{H}:flags=lanczos[bg];"
               f"[a]crop={cw_}:{ch_}:{cx}:{cy},scale={pw}:-2:flags=lanczos[pip];"
