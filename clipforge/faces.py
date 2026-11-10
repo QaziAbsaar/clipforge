@@ -1,0 +1,125 @@
+"""Face tracking for vertical framing, with a simple active-speaker focus (mouth movement).
+Honest limits: classic face detector, works best on clear, front-facing webcam-style faces."""
+import subprocess
+
+import numpy as np
+
+_cascade = None
+
+
+def _detector():
+    global _cascade
+    if _cascade is None:
+        import cv2
+        _cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        if _cascade.empty():
+            raise RuntimeError("Face detector files are missing. Reinstall: pip install \"opencv-python-headless<5\"")
+    return _cascade
+
+
+def _even(v):
+    return int(v) // 2 * 2
+
+
+def crop_width(h):
+    return _even(h * 9 / 16)
+
+
+def _read_frames(ffmpeg, src, start, end, W, H, fps, sw=512):
+    sh = _even(round(sw * H / W))
+    cmd = [ffmpeg, "-v", "error", "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", src,
+           "-vf", f"fps={fps},scale={sw}:{sh}", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+    raw = subprocess.run(cmd, capture_output=True).stdout
+    n = len(raw) // (sw * sh)
+    return np.frombuffer(raw[: n * sw * sh], dtype=np.uint8).reshape(n, sh, sw), sw / W
+
+
+def track(ffmpeg, src, W, H, start, end, fps=8, should_stop=None):
+    """Returns {'pts': [[t, crop_left_px], ...], 'found': share_of_frames_with_a_face, 'cw': crop_width}.
+    t is seconds from the clip start; crop_left_px is the left edge of the 9:16 window in source pixels."""
+    import cv2
+    cw = crop_width(H)
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps)
+    det = _detector()
+    min_face = max(20, int(frames.shape[2] * 0.03)) if len(frames) else 20
+    tracks, prev, target, last_switch = [], None, None, -99
+    raw_targets, found = [], 0
+    for i, g in enumerate(frames):
+        if should_stop and i % 20 == 0:
+            should_stop()
+        faces = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=5, minSize=(min_face, min_face))
+        dets = []
+        for (x, y, w, h) in faces:
+            motion = 0.0
+            if prev is not None:                       # mouth area = lower part of the face box
+                y0, y1 = y + int(h * 0.6), y + h
+                a, b = g[y0:y1, x:x + w].astype(np.int16), prev[y0:y1, x:x + w].astype(np.int16)
+                if a.size and a.shape == b.shape:
+                    motion = float(np.abs(a - b).mean())
+            dets.append({"x": (x + w / 2) / scale, "size": w / scale, "motion": motion})
+        for t in tracks:
+            t["seen"] = False
+        for d in dets:                                 # match detections to known faces by position
+            best = min(tracks, key=lambda t: abs(t["x"] - d["x"]), default=None)
+            if best is not None and abs(best["x"] - d["x"]) < max(d["size"] * 1.5, 40):
+                best["x"], best["size"], best["seen"] = d["x"], d["size"], True
+                best["motion"] = 0.7 * best["motion"] + 0.3 * d["motion"]
+                best["n"] += 1
+            else:
+                tracks.append({"x": d["x"], "size": d["size"], "motion": d["motion"], "seen": True, "n": 1, "miss": 0})
+        for t in tracks:
+            t["miss"] = 0 if t["seen"] else t["miss"] + 1
+        tracks = [t for t in tracks if t["miss"] < fps * 2]
+        visible = [t for t in tracks if t["seen"]]
+        if visible:
+            found += 1
+            cur = target if target in visible else None
+            if cur is None:
+                target = max(visible, key=lambda t: t["size"] * (1 + t["motion"]))
+                last_switch = i
+            else:
+                top = max(visible, key=lambda t: t["motion"])
+                if top is not cur and top["n"] >= 3 and top["motion"] > 1.6 * cur["motion"] + 0.6 \
+                        and i - last_switch >= fps * 1.2:
+                    target, last_switch = top, i
+            raw_targets.append(target["x"])
+        else:
+            raw_targets.append(None)
+        prev = g
+    # fill gaps: hold the last position for ~3 s, then drift back to centre
+    out, last, gap = [], None, 0
+    for t in raw_targets:
+        if t is not None:
+            last, gap = t, 0
+        else:
+            gap += 1
+            if gap > fps * 3:
+                last = W / 2
+        out.append(last if last is not None else W / 2)
+    # camera smoothing with a dead zone so it doesn't jitter
+    cam = out[0] if out else W / 2
+    pts = []
+    dead = 0.10 * cw
+    for i, tx in enumerate(out):
+        if abs(tx - cam) > dead:
+            cam += (tx - cam) * 0.3
+        left = min(max(cam - cw / 2, 0), W - cw)
+        pts.append([round(i / fps, 3), round(left, 1)])
+    return {"pts": pts, "found": (found / len(frames)) if len(frames) else 0.0, "cw": cw}
+
+
+def write_sendcmd(pts, path, out_fps=30):
+    """FFmpeg 'sendcmd' file that moves the crop window smoothly (one command per output frame, changes only)."""
+    if not pts:
+        return 0
+    ts = np.array([p[0] for p in pts]); xs = np.array([p[1] for p in pts])
+    end = ts[-1] + 1.0 / 8
+    lines, last = [], None
+    for t in np.arange(0, end, 1.0 / out_fps):
+        x = _even(np.interp(t, ts, xs))
+        if x != last:
+            lines.append(f"{t:.3f} crop x {x};")
+            last = x
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return _even(xs[0])
