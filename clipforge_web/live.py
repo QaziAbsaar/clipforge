@@ -211,6 +211,7 @@ class Live:
         probed = False
         while not self.stopped:
             time.sleep(1.0)
+            ended = self.src.poll() is not None and self.seg.poll() is not None
             if self.src.poll() is not None and not self.segs and self.seg.poll() is not None:
                 try:
                     tail = open(os.path.join(self.dir, "source.log"), errors="replace").read()[-300:].strip()
@@ -261,6 +262,10 @@ class Live:
                 self._detect(t_sec, comb, audio, chat)
                 t_sec += 1
             self._housekeeping()
+            if ended and self.segs:                            # the streamer went offline: finish up by itself
+                self.stopped = True
+                self.chat.close()
+                db.ex("update videos set status='ready', stage='', progress=100 where id=? and status='live'", (self.id,))
         if self.state != "error":
             self.state = "stopped"
 
@@ -412,3 +417,4 @@ def stop(vid):
     v = db.q("select * from videos where id=?", (vid,), one=True)
     if v and v["status"] == "live":
         db.ex("update videos set status='ready', stage='', progress=100 where id=?", (vid,))
+
