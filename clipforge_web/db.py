@@ -26,7 +26,7 @@ create table if not exists settings(key text primary key, value text);
 """
 
 MIGRATE = {
-    "videos": [("client_id", "integer"), ("kind", "text"), ("progress", "real default 0"), ("stage", "text default ''")],
+    "videos": [("hd", "integer default 0"), ("cookies", "text"), ("client_id", "integer"), ("kind", "text"), ("progress", "real default 0"), ("stage", "text default ''")],
     "clips": [("render_progress", "real default 0"), ("src", "text"), ("track", "text"), ("downloaded", "integer default 0"), ("stream_offset", "real default 0"), ("cam", "text")],
 }
 
