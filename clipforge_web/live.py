@@ -14,6 +14,7 @@ SESSIONS = {}
 CHAT_FACTORY = None          # tests replace this
 SEG_SECONDS = 5
 NOT_CHANNELS = {"videos", "video", "directory", "downloads", "clips", "settings", "p", "about", "login"}
+TEST_FILES = os.environ.get("CLIPFORGE_TEST_SOURCES") == "1"   # lets tests play a local file as a "stream"
 DEFAULT_CFG = dict(warmup=60.0, hi=0.55, lo=0.30, cooldown=40.0, lead=22.0, tail=10.0, buffer=1200.0, model="base")
 
 
@@ -96,7 +97,7 @@ class NoChat:
 
 # ---------------- the live session ----------------
 def source_cmd(url):
-    if os.path.exists(url):                                   # test source: a local file played like a stream
+    if TEST_FILES and os.path.exists(url):                    # test source: a local file played like a stream
         return [which("ffmpeg"), "-v", "error", "-readrate", os.environ.get("CLIPFORGE_TEST_READRATE", "1"),
                 "-i", url, "-c", "copy", "-f", "mpegts", "pipe:1"]
     return [which("streamlink"), "--stdout", "--quiet", "--retry-streams", "3", "--retry-max", "3", url, "best"]
@@ -374,8 +375,9 @@ def re_first_sentence(words):
 
 # ---------------- manager ----------------
 def start(url, client_id=None, cfg=None):
-    platform, channel = parse_url(url) if not os.path.exists(url) else ("twitch", "test")
-    if not os.path.exists(url):
+    test = TEST_FILES and os.path.exists(url)
+    platform, channel = ("twitch", "test") if test else parse_url(url)
+    if not test:
         which("streamlink")                                    # fail early with a clear message if missing
     vid = db.ex("insert into videos(title,source,status,created,client_id,kind,stage) values(?,?,?,?,?,?,?)",
                 (f"Live: {channel} ({platform})", url, "live", db.now(), client_id, "live", "Connecting"))
