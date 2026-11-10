@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipForge</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">Clip<i>Forge</i></div>
+  <div class="row fit"><button id="setBtn" class="ghost">Settings</button><button id="signout" class="ghost" hidden>Sign out</button></div>
+</header>
+<div id="banner" hidden></div>
+
+<div id="app" class="noedit">
+  <aside class="stack">
+    <div>
+      <label for="clientSel">Client</label>
+      <select id="clientSel"></select>
+    </div>
+    <details id="clientBox" hidden><summary class="muted small" style="cursor:pointer">Client settings</summary>
+      <div class="stack" style="margin-top:8px">
+        <div><label for="c_name">Name</label><input id="c_name"></div>
+        <div><label for="c_tpl">Default caption style</label><select id="c_tpl"></select></div>
+        <div><label for="c_music">Default music</label><select id="c_music"></select></div>
+        <div class="row"><button id="c_save" class="primary">Save</button><button id="c_del" class="ghost">Delete</button></div>
+      </div></details>
+
+    <div class="card stack">
+      <h2>Add a video</h2>
+      <textarea id="links" placeholder="Paste video links, one per line"></textarea>
+      <div class="row">
+        <div><label for="a_clips">Clips</label><input id="a_clips" type="number" min="1" max="100" value="20"></div>
+        <div><label for="a_len">Seconds</label><input id="a_len" type="number" min="8" max="90" value="30"></div>
+        <div><label for="quality">Quality</label><select id="quality"><option value="1080">1080p</option><option value="2160">4K</option></select></div>
+      </div>
+      <div class="row"><button id="addLinks" class="primary">Add links</button><button id="pick">Upload files</button></div>
+      <input id="files" type="file" accept="video/*,.mkv" multiple hidden>
+      <div id="uploads"></div>
+      <p class="muted small" style="margin:0">Clips are found automatically. 100 clips from a 20-minute video works at about 12 seconds each.</p>
+    </div>
+
+    <div class="card stack">
+      <h2>Go live</h2>
+      <input id="liveUrl" placeholder="https://www.twitch.tv/channel or kick.com/channel">
+      <button id="liveStart" class="primary" style="width:100%">Start clipping the stream</button>
+    </div>
+
+    <div>
+      <h2 style="margin:6px 0 0">Your videos</h2>
+      <div id="vlist"></div>
+    </div>
+  </aside>
+  <main id="main"></main>
+  <section id="editor"></section>
+</div>
+
+<dialog id="settings">
+  <h2 style="margin-bottom:12px">Settings</h2>
+  <div class="stack">
+    <div><label for="s_model">Speech accuracy</label>
+      <select id="s_model"><option value="base">Fast (base)</option><option value="small">Better (small)</option><option value="medium">Best, slow (medium)</option></select></div>
+    <div><label for="s_key">AI scoring key (optional)</label><input id="s_key" type="password" placeholder="Anthropic API key" autocomplete="off">
+      <p class="muted small" style="margin:6px 0 0">With a key, an AI editor also reads each clip's transcript to judge humor, surprise and whether the clip is complete. The transcripts are sent to Anthropic. Without a key the built-in scoring is used.</p></div>
+    <p id="s_state" class="small"></p>
+    <div class="row"><button id="s_save" class="primary">Save</button><button id="s_test">Test key</button><button id="s_close" class="ghost">Close</button></div>
+  </div>
+</dialog>
+<div id="toast" hidden></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=t=>{t=Math.max(0,t||0);return Math.floor(t/60)+':'+String(Math.floor(t%60)).padStart(2,'0')};
+const fmtLong=t=>{t=Math.round(t||0);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`};
+const mb=n=>n>1e9?(n/1e9).toFixed(2)+' GB':(n/1e6).toFixed(0)+' MB';
+async function api(path,opt={}){
+  const r=await fetch(path,opt);
+  if(r.status===401){location='/login';throw new Error('Please sign in again.')}
+  if(!r.ok){let d='Something went wrong ('+r.status+')';try{d=(await r.json()).detail||d}catch{}throw new Error(d)}
+  return r.json();
+}
+const send=(m,p,b)=>api(p,{method:m,headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+let toastT;
+function toast(msg,err){const t=$('#toast');t.textContent=msg;t.className=err?'err':'';t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,err?6500:3000)}
+const guard=fn=>async(...a)=>{try{return await fn(...a)}catch(e){toast(e.message,true)}};
+const S={clients:[],client:null,videos:[],vid:null,video:null,clips:[],cid:null,clip:null,cues:[],framing:null,tpl:{},audio:{music:[],sfx:[]},
+  sel:new Set(),uploads:[],autoDl:new Set(),entered:new Set(),mstate:'',live:null,settings:{}};
+
+/* generic keyed list: only changed items are redrawn, so nothing flickers while progress updates */
+function sync(box,items,key,sig,html,cls,after){
+  const have=new Map([...box.children].filter(e=>e.dataset.k).map(e=>[e.dataset.k,e]));let prev=null;
+  items.forEach((it,i)=>{
+    const k=String(key(it)),s=sig(it);let el=have.get(k);
+    if(!el){el=document.createElement('div');el.dataset.k=k;el.className=cls;el.dataset.s='';el.style.setProperty('--i',Math.min(i,14));
+      if(!S.entered.has(cls+k)){el.classList.add('enter');S.entered.add(cls+k)}}
+    if(el.dataset.s!==s){el.innerHTML=html(it);el.dataset.s=s;if(after)after(el,it)}
+    have.delete(k);const want=prev?prev.nextSibling:box.firstChild;if(el!==want)box.insertBefore(el,want);prev=el;
+  });
+  have.forEach(e=>e.remove());
+}
+function swapText(el,txt){if(el&&el.textContent!==txt){el.textContent=txt;el.classList.remove('swap');void el.offsetWidth;el.classList.add('swap')}}
+
+/* ---------------- clients ---------------- */
+function optList(list,sel,none){return (none?`<option value="">${none}</option>`:'')+list.map(x=>`<option ${x===sel?'selected':''}>${esc(x)}</option>`).join('')}
+function drawClientBar(){
+  $('#clientSel').innerHTML='<option value="">All clients</option>'+S.clients.map(c=>`<option value="${c.id}" ${c.id===S.client?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">+ New client…</option>';
+  const c=S.clients.find(x=>x.id===S.client);$('#clientBox').hidden=!c;
+  if(c){$('#c_name').value=c.name;
+    $('#c_tpl').innerHTML=Object.keys(S.tpl).map(n=>`<option value="${n}" ${n===c.template?'selected':''}>${n.replace(/_/g,' ')}</option>`).join('');
+    $('#c_music').innerHTML=optList(S.audio.music,c.music,'None')}
+}
+$('#clientSel').onchange=guard(async e=>{
+  if(e.target.value==='__new'){const name=prompt('Client name');if(name&&name.trim()){const c=await send('POST','/api/clients',{name:name.trim()});S.clients.push(c);S.client=c.id}}
+  else S.client=e.target.value?+e.target.value:null;
+  drawClientBar();drawRail();
+});
+$('#c_save').onclick=guard(async()=>{const c=await send('PATCH','/api/clients/'+S.client,{name:$('#c_name').value,template:$('#c_tpl').value,music:$('#c_music').value});
+  S.clients=S.clients.map(x=>x.id===c.id?c:x);drawClientBar();toast('Client saved.')});
+$('#c_del').onclick=guard(async()=>{if(!confirm('Delete this client? Its videos are kept.'))return;
+  await api('/api/clients/'+S.client,{method:'DELETE'});S.clients=S.clients.filter(x=>x.id!==S.client);S.client=null;drawClientBar();await tick()});
+$('#signout').onclick=async()=>{await send('POST','/api/logout');location='/login'};
+
+/* ---------------- add video / go live ---------------- */
+$('#addLinks').onclick=guard(async()=>{
+  const urls=$('#links').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const r=await send('POST','/api/videos/link',{urls,max_height:+$('#quality').value,client_id:S.client,clips:+$('#a_clips').value,length:+$('#a_len').value});
+  $('#links').value='';await tick();selectVideo(r.ids[0]);
+});
+$('#pick').onclick=()=>$('#files').click();
+$('#files').onchange=e=>{[...e.target.files].forEach(uploadFile);e.target.value=''};
+function uploadFile(f){
+  const u={name:f.name,pct:0,err:null};S.uploads.push(u);drawUploads();
+  const x=new XMLHttpRequest();
+  x.open('POST','/api/videos/upload?clips='+(+$('#a_clips').value)+'&length='+(+$('#a_len').value)+(S.client?'&client_id='+S.client:''));
+  x.upload.onprogress=e=>{if(e.lengthComputable){u.pct=Math.round(e.loaded/e.total*100);drawUploads()}};
+  x.onload=async()=>{if(x.status<300){S.uploads=S.uploads.filter(i=>i!==u);drawUploads();await tick();if(!S.vid)selectVideo(JSON.parse(x.responseText).id)}
+    else{let d='Upload failed';try{d=JSON.parse(x.responseText).detail}catch{}u.err=d;drawUploads()}};
+  x.onerror=()=>{u.err='Upload failed. Is the app still running?';drawUploads()};
+  const fd=new FormData();fd.append('file',f);x.send(fd);
+}
+function drawUploads(){$('#uploads').innerHTML=S.uploads.map(u=>`<div class="small" style="margin-top:4px">${esc(u.name)} ${u.err?'<span style="color:var(--low)">'+esc(u.err)+'</span>':u.pct+'%'}${u.err?'':'<div class="bar"><i style="width:'+u.pct+'%"></i></div>'}</div>`).join('')}
+$('#liveStart').onclick=guard(async()=>{const r=await send('POST','/api/live',{url:$('#liveUrl').value,client_id:S.client});$('#liveUrl').value='';await tick();selectVideo(r.id)});
+
+/* ---------------- videos rail ---------------- */
+function drawRail(){
+  const list=S.videos.filter(v=>S.client==null||v.client_id===S.client);
+  const box=$('#vlist');
+  if(!list.length){box.innerHTML='<p class="muted small">Nothing here yet. Add a video or go live above.</p>';return}
+  if(box.querySelector('p'))box.innerHTML='';
+  sync(box,list,v=>v.id,v=>[v.title,v.status,Math.round(v.progress),v.clips,v.approved,v.id===S.vid].join('|'),v=>{
+    const busy=v.status==='importing'||v.status==='analyzing';
+    return `<div class="t">${esc(v.title||v.source)}</div>
+      <div class="muted small">${v.status==='live'?'<span class="livebadge"><i></i>LIVE</span> ':''}${v.duration?fmtLong(v.duration)+' · ':''}${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'?'Needs attention':''}</div>
+      ${busy?`<div class="bar" style="margin-top:7px"><i style="width:${Math.max(4,v.progress)}%"></i></div>`:''}
+      <button class="x" data-del="${v.id}" title="Remove" aria-label="Remove video">✕</button>`},'vitem',
+    (el,v)=>{el.classList.toggle('on',v.id===S.vid);el.setAttribute('role','button');el.tabIndex=0});
+}
+$('#vlist').addEventListener('click',guard(async e=>{
+  const del=e.target.closest('[data-del]');
+  if(del){e.stopPropagation();if(!confirm('Remove this video, its clips and any saved files?'))return;
+    await api('/api/videos/'+del.dataset.del,{method:'DELETE'});if(S.vid==del.dataset.del){S.vid=null;S.video=null;S.cid=null;showEditor(false);S.mstate='';drawMain()}await tick();return}
+  const it=e.target.closest('.vitem');if(it)selectVideo(+it.dataset.k);
+}));
+
+/* ---------------- main area ---------------- */
+function mstateOf(v){if(!v)return 'none';if(v.kind==='live'&&v.status==='live')return 'live';
+  if(v.status==='importing'||v.status==='analyzing')return 'busy';if(v.status==='error')return 'error';return 'ready'}
+async function selectVideo(id){
+  S.vid=id;S.cid=null;S.clip=null;S.sel=new Set();S.mstate='';showEditor(false);
+  S.video=S.videos.find(v=>v.id===id)||await api('/api/videos/'+id);await loadClips();drawRail();updateMain();
+}
+function drawMain(){
+  const m=$('#main'),v=S.video,st=S.mstate;
+  if(st==='none'){m.innerHTML=`<div class="empty"><h1>Find the moments worth posting</h1>
+    <p>Add a video or go live. ClipForge listens for loud moments, crowd and chat reactions, follows the face, and gives you ranked clips with captions.</p>
+    <div class="steps"><div><b>1. Add</b>A link, a file, or a live stream.</div><div><b>2. Review</b>Best clips come first, with the reason.</div><div><b>3. Approve</b>It's made and saved to your Downloads.</div></div></div>`;return}
+  if(st==='busy'){m.innerHTML=`<div class="hero"><div class="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <h2 id="stage" class="swap">Getting ready</h2><div class="pct"><span id="pct">0</span>%</div>
+    <div class="bar"><i id="pbar" style="width:3%"></i></div><p class="muted small" id="vtitle" style="margin:0 0 14px"></p>
+    <button id="cancelV" class="ghost">Cancel</button></div>`;
+    $('#cancelV').onclick=guard(async()=>{await send('POST','/api/videos/'+S.vid+'/cancel');toast('Stopping…')});return}
+  if(st==='error'){m.innerHTML=`<div class="hero"><h2 style="color:var(--low)">This one didn't work</h2><p id="errmsg" class="muted"></p>
+    <div class="row" style="justify-content:center"><button id="retryV" class="primary">Try again</button></div></div>`;
+    $('#errmsg').textContent=v.error||'Something went wrong.';
+    $('#retryV').onclick=guard(async()=>{await send('POST','/api/videos/'+S.vid+'/retry',{clips:+$('#a_clips').value,length:+$('#a_len').value});await tick()});return}
+  const live=st==='live',isLive=v.kind==='live';
+  m.innerHTML=`<div id="vhead"></div>
+    ${live?`<div class="card live" id="liveBox"><div class="row"><span class="livebadge fit"><i></i>LIVE</span><strong id="lv_ch" style="flex:1"></strong><span id="lv_time" class="muted fit"></span></div>
+      <div class="meters"><div><label>Sound</label><svg viewBox="0 0 120 40" preserveAspectRatio="none"><path id="sp_a" stroke="#8c9bff"/></svg></div>
+        <div><label>Chat</label><svg viewBox="0 0 120 40" preserveAspectRatio="none"><path id="sp_c" stroke="#5fe3c0"/></svg></div></div>
+      <p id="lv_note" class="muted small" style="margin:0 0 10px"></p>
+      <div class="row"><button id="lv_clip" class="primary">Clip it now</button><button id="lv_stop" class="danger">Stop recording</button></div></div>`:''}
+    ${(!live&&!isLive)?`<div class="card" id="refind"><div class="controls" style="margin:0">
+      <div><label for="f_clips">Clips (up to 100)</label><input id="f_clips" type="number" min="1" max="100" value="${+$('#a_clips').value||20}"></div>
+      <div><label for="f_len">Length (s)</label><input id="f_len" type="number" min="8" max="90" value="${+$('#a_len').value||30}"></div>
+      <div><label for="f_chat">Chat log (optional)</label><input id="f_chat" type="file" accept=".txt,.log,.csv"></div>
+      <div><button id="find" class="primary" style="width:100%">Find clips again</button></div></div>
+      <p class="muted small" id="fitnote" style="margin:8px 0 0"></p></div>`:''}
+    <div class="card map" id="mapbox" style="margin-top:14px"></div>
+    <div class="row" style="margin-bottom:2px"><h2 id="clipcount" style="flex:1"></h2><button id="appSel">Approve selected</button></div>
+    <div id="cands"></div>`;
+  if($('#find')){const upd=()=>{const L=+$('#f_len').value||30;$('#fitnote').textContent=`At ${L} seconds each, this video fits up to ${Math.max(1,Math.floor((S.video.duration||0)/L))} clips.`};
+    $('#f_len').oninput=upd;upd();$('#find').onclick=guard(findAgain)}
+  if(live){$('#lv_clip').onclick=guard(async()=>{await send('POST','/api/live/'+S.vid+'/clip');toast('Cutting that moment…')});
+    $('#lv_stop').onclick=guard(async()=>{$('#lv_stop').disabled=true;toast('Finishing the last clips…');await send('POST','/api/live/'+S.vid+'/stop');await tick()})}
+  $('#appSel').onclick=guard(async()=>{const ids=[...S.sel];if(!ids.length)return toast('Tick the clips you want first.',true);for(const id of ids)await approve(id,true);S.sel.clear();updateMain()});
+  $('#cands').addEventListener('click',e=>{
+    const cb=e.target.closest('[data-sel]');if(cb){e.stopPropagation();cb.checked?S.sel.add(+cb.dataset.sel):S.sel.delete(+cb.dataset.sel);return}
+    const r=e.target.closest('.cand');if(r)selectClip(+r.dataset.k)});
+}
+async function findAgain(){
+  const f=$('#f_chat').files[0];
+  if(f){const fd=new FormData();fd.append('file',f);const r=await fetch('/api/videos/'+S.vid+'/chat',{method:'POST',body:fd});if(!r.ok)throw new Error((await r.json()).detail)}
+  await send('POST','/api/videos/'+S.vid+'/analyze',{clips:+$('#f_clips').value,length:+$('#f_len').value});await tick();
+}
+function metaLine(v){return v.duration?`${fmtLong(v.duration)} · ${v.w||'?'}×${v.h||'?'}${v.fps?' · '+Math.round(v.fps)+' fps':''}${v.size?' · '+mb(v.size):''}`:''}
+function updateMain(){
+  const v=S.video,st=mstateOf(v);
+  if(st!==S.mstate){S.mstate=st;drawMain()}
+  if(!v)return;
+  if(st==='busy'){swapText($('#stage'),v.stage||'Working');$('#pct').textContent=Math.round(v.progress);$('#pbar').style.width=Math.max(3,v.progress)+'%';$('#vtitle').textContent=v.title||''}
+  if(st==='error'&&$('#errmsg'))$('#errmsg').textContent=v.error||'Something went wrong.';
+  if(st==='ready'||st==='live'){
+    $('#vhead').innerHTML=`<h1 style="font-size:23px;letter-spacing:-.01em">${esc(v.title)}</h1><div class="muted small" style="margin-top:3px">${metaLine(v)}${v.kind==='live'&&st==='ready'?' · recording finished':''}</div>
+      ${v.error?`<p style="color:var(--low);margin:8px 0 0" class="small">${esc(v.error)}</p>`:''}`;
+    $('#clipcount').textContent=S.clips.length?`${S.clips.length} clip${S.clips.length>1?'s':''}, best first`:(st==='live'?'Clips appear here as moments happen':'No clips yet');
+    drawMap();drawCands();
+  }
+}
+function drawMap(){
+  const box=$('#mapbox');if(!box)return;const v=S.video;
+  const sig=(v.curve?v.curve.v.length:0)+'|'+S.clips.map(c=>c.id+c.status+(c.id===S.cid?'*':'')).join(',')+'|'+Math.round(v.duration||0);
+  if(box.dataset.s===sig)return;box.dataset.s=sig;
+  if(!v||!v.curve){box.innerHTML='<p class="muted small" style="margin:6px 0">The moment map shows up here once the video has been listened to.</p>';return}
+  const c=v.curve.v,W=Math.max(320,Math.round(box.clientWidth-26)),H=84,n=Math.max(c.length,2);
+  const pts=c.map((y,i)=>[i/(n-1)*W,H-6-y*(H-18)]);
+  const area='M0,'+(H-6)+' L'+pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' L')+' L'+(pts.length?pts[pts.length-1][0]:W)+','+(H-6)+' Z';
+  const dur=Math.max(v.duration||1,1);
+  const marks=S.clips.map(k=>{const x=Math.min(W-2,k.peak/dur*W*(S.video.kind==='live'?1:1)).toFixed(1);const on=k.id===S.cid;
+    const col=k.status==='approved'?'var(--good)':k.status==='rejected'?'var(--muted)':'var(--accent)';
+    return `<g data-m="${k.id}" style="cursor:pointer"><line x1="${x}" x2="${x}" y1="2" y2="${H-6}" stroke="${col}" stroke-width="${on?3:1.5}"/><circle cx="${x}" cy="8" r="${on?7:5}" fill="${col}"/></g>`}).join('');
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Moment map"><defs><linearGradient id="mg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#8c9bff" stop-opacity=".5"/><stop offset="1" stop-color="#8c9bff" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#mg)"/>${S.video.kind==='live'?'':marks}</svg>
+    <div class="row muted small"><span>0:00</span><span style="text-align:center">Excitement across the video. Markers are the picked clips.</span><span style="text-align:right">${fmtLong(v.duration)}</span></div>`;
+  box.querySelectorAll('[data-m]').forEach(g=>g.onclick=()=>selectClip(+g.dataset.m));
+}
+function scoreCol(s){return s>=.6?'var(--good)':s>=.35?'var(--mid)':'var(--low)'}
+function bar(label,val){return val==null?'':`<div>${label} ${Math.round(val*100)}<div class="bar"><i style="width:${Math.round(val*100)}%"></i></div></div>`}
+function stateBadge(k){
+  if(k.render_status==='running'||k.render_status==='queued')return `<span class="pill busy">${k.render_status==='queued'?'Waiting':'Preparing '+Math.round(k.render_progress)+'%'}</span>`;
+  if(k.render_status==='failed')return '<span class="pill err">Failed</span>';
+  if(k.status==='approved'&&k.rendered&&k.downloaded)return '<span class="pill ok">Saved to Downloads ✓</span>';
+  if(k.status==='approved'&&k.rendered)return '<span class="pill ok">Ready</span>';
+  if(k.status==='approved')return '<span class="pill ok">Approved</span>';
+  if(k.status==='rejected')return '<span class="pill">Rejected</span>';return '';
+}
+function drawCands(){
+  const box=$('#cands');if(!box)return;
+  const ranks=new Map(S.clips.map((k,i)=>[k.id,i+1]));
+  sync(box,S.clips,k=>k.id,k=>[k.score,k.title,k.status,k.render_status,Math.round(k.render_progress||0),k.downloaded,k.id===S.cid,S.sel.has(k.id),k.start,k.end,k.stream_offset,ranks.get(k.id)].join('|'),k=>{
+    const sc=k.scores||{},C=2*Math.PI*21,pct=Math.round(k.score*100);
+    return `<input type="checkbox" data-sel="${k.id}" ${S.sel.has(k.id)?'checked':''} aria-label="Select clip">
+      <div class="rank">#${ranks.get(k.id)}</div>
+      <div class="ring"><svg viewBox="0 0 52 52"><circle class="bg" cx="26" cy="26" r="21"/><circle class="fg" cx="26" cy="26" r="21" stroke="${scoreCol(k.score)}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-k.score)}"/></svg><b style="color:${scoreCol(k.score)}">${pct}</b></div>
+      <div style="min-width:0"><div class="ti">${esc(k.title)}</div><div class="muted small">${fmt(k.start+(k.stream_offset||0))}–${fmt(k.end+(k.stream_offset||0))} · ${Math.round(k.end-k.start)}s ${stateBadge(k)}</div></div>
+      <div class="mini">${bar('Sound',sc.audio)}${bar('Speech',sc.speech)}${bar('Chat',sc.chat)}${bar('Replays',sc.heat)}${bar('AI',sc.ai)}</div>
+      ${(k.render_status==='running'||k.render_status==='queued')?`<div class="cprog"><i style="width:${Math.max(4,k.render_progress||0)}%"></i></div>`:''}`},'cand',
+    (el,k)=>{el.classList.toggle('on',k.id===S.cid);el.classList.toggle('approved',k.status==='approved');el.classList.toggle('rejected',k.status==='rejected')});
+}
+async function loadClips(){
+  if(!S.vid)return;S.clips=await api('/api/videos/'+S.vid+'/clips');
+  if(S.cid){const k=S.clips.find(x=>x.id===S.cid);if(k){Object.assign(S.clip,k);updateApproveUI()}}
+  S.clips.forEach(k=>{if(S.autoDl.has(k.id)&&k.render_status==='done'&&k.rendered){S.autoDl.delete(k.id);startDownload(k.id);toast('Saved to your Downloads folder.')}
+    if(S.autoDl.has(k.id)&&k.render_status==='failed'){S.autoDl.delete(k.id);toast('That clip could not be made: '+(k.render_error||'unknown error'),true)}});
+}
+function startDownload(id){const a=document.createElement('a');a.href='/api/clips/'+id+'/download';a.download='';document.body.appendChild(a);a.click();a.remove()}
+async function approve(id,quiet){
+  const r=await send('POST','/api/clips/'+id+'/approve');
+  if(r.needs_render){S.autoDl.add(id);if(!quiet)toast('Preparing your clip. It downloads when it is ready.')}
+  else{startDownload(id);if(!quiet)toast('Saved to your Downloads folder.')}
+  Object.assign(S.clip&&S.clip.id===id?S.clip:{},r.clip);await loadClips();updateMain();
+}
+
+/* ---------------- live console ---------------- */
+async function pollLive(){
+  if(S.mstate!=='live'||!$('#lv_ch'))return;
+  try{const s=await api('/api/live/'+S.vid+'/stats');S.live=s;
+    $('#lv_ch').textContent=s.channel+' on '+s.platform;$('#lv_time').textContent='Recording '+fmtLong(s.elapsed);
+    const path=a=>a.length?'M'+a.map((y,i)=>(i/(Math.max(a.length-1,1))*120).toFixed(1)+','+(38-Math.min(1,y)*34).toFixed(1)).join(' L'):'';
+    $('#sp_a').setAttribute('d',path(s.audio));$('#sp_c').setAttribute('d',path(s.chat));
+    $('#lv_note').textContent=s.state==='error'?s.error:(s.warmup>0?`Learning this stream's normal level (${Math.ceil(s.warmup)}s). `:`Watching for big moments. `)+`${s.moments} clip${s.moments===1?'':'s'} so far. ${s.chat_status||''}`;
+    $('#lv_clip').disabled=s.state!=='recording'}catch(e){}
+}
+
+/* ---------------- editor ---------------- */
+function showEditor(on){$('#app').classList.toggle('noedit',!on);if(!on)$('#editor').innerHTML=''}
+async function selectClip(id){
+  S.cid=id;S.clip=await api('/api/clips/'+id);S.framing=null;await loadCues();showEditor(true);buildEditor();drawCands();drawMap();loadFraming();
+}
+async function loadCues(){S.cues=await api('/api/clips/'+S.cid+'/cues')}
+async function loadFraming(){
+  const id=S.cid,hint=$('#facehint');
+  if(!S.clip||S.clip.layout!=='follow'){if(hint)hint.hidden=true;S.framing=null;applyLayout();return}
+  if(hint){hint.hidden=false;hint.innerHTML='<span class="spin"></span>Finding the face'}
+  try{const f=await api('/api/clips/'+id+'/framing');if(S.cid!==id)return;S.framing=f;
+    if(hint){hint.innerHTML=f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
+  catch(e){if(hint)hint.hidden=true;toast(e.message,true)}
+  applyLayout();
+}
+async function save(patch){
+  const c=await send('PATCH','/api/clips/'+S.cid,patch);Object.assign(S.clip,c);await loadClips();drawCands();drawMap();updateApproveUI();return c;
+}
+const tplShadow=(t,px)=>{const o=Math.max(1,Math.round(t.ow*px*.55)),s=[];for(let x=-o;x<=o;x++)for(let y=-o;y<=o;y++)if(x||y)s.push(`${x}px ${y}px 0 ${t.outline}`);return s.join(',')};
+function buildEditor(){
+  const c=S.clip,el=$('#editor');
+  el.innerHTML=`<div class="ed"><div class="edbody stack">
+   <div class="row"><h2 style="flex:1">Edit clip</h2><button id="close" class="ghost" aria-label="Close editor">✕</button></div>
+   <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
+   <div class="row"><button id="play">Play</button><label style="margin:0" class="fit"><input type="checkbox" id="loop" checked> Loop</label><label style="margin:0" class="fit"><input type="checkbox" id="snd"> Sound</label></div>
+   <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
+   <div><label>Framing</label><div class="seg" id="layout"><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
+     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${c.layout==='crop'?'':'hidden'} aria-label="Crop position"></div>
+   <div><label>Caption style</label><div class="styles" id="tpls"></div>
+     <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
+   <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
+   <div class="row"><div><label for="music">Music</label><select id="music">${optList(S.audio.music,c.music,'None')}</select></div>
+     <div><label for="sfx1">Sound effect</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div></div>
+   <div class="tm"><div><label for="st">Start (s)</label><input id="st" type="number" step="0.1" value="${c.start.toFixed(1)}"><div class="nudge"><button data-n="st:-1">−1</button><button data-n="st:-.5">−.5</button><button data-n="st:.5">+.5</button><button id="stNow">Playhead</button></div></div>
+     <div><label for="en">End (s)</label><input id="en" type="number" step="0.1" value="${c.end.toFixed(1)}"><div class="nudge"><button data-n="en:-.5">−.5</button><button data-n="en:.5">+.5</button><button data-n="en:1">+1</button><button id="enNow">Playhead</button></div></div></div>
+   <p class="muted small" id="dur" style="margin:0"></p>
+   <div><label>Why this clip</label><ul class="why">${(c.reasons||[]).map(r=>`<li>${esc(r)}</li>`).join('')}</ul></div>
+   <hr><h2>Captions</h2><p class="muted small" style="margin:2px 0 0">Fix any word. Timing stays with the words you keep.</p><div id="cues"></div>
+  </div><div class="edfoot"><button id="reject" class="ghost">Reject</button><button id="approve" class="primary"><i class="fill"></i><span></span></button></div></div>`;
+  $('#tpls').innerHTML=Object.entries(S.tpl).map(([n,t])=>`<button class="style ${n===c.template?'on':''}" data-t="${n}"><span class="s" style="color:${t.active};text-shadow:${t.box?'none':tplShadow(t,.08)};${t.box?'background:#000b;border-radius:4px;padding:0 4px':''}">${t.upper?'WORD':'Word'}</span><small>${n.replace(/_/g,' ')}</small></button>`).join('');
+  const v=$('#pv');v.src='/api/clips/'+c.id+'/source#t='+c.start;
+  v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();applyLayout()});
+  v.addEventListener('timeupdate',onTime);v.addEventListener('seeked',()=>{drawCaption();applyLayout()});
+  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();if(!v.paused)requestAnimationFrame(loop)})()});
+  v.addEventListener('pause',()=>$('#play').textContent='Play');
+  sizePhone();markSeg();drawCues();updateApproveUI();updDur();
+  $('#close').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
+  $('#play').onclick=playClip;$('#snd').onchange=e=>v.muted=!e.target.checked;
+  $('#approve').onclick=guard(()=>approve(S.cid));
+  $('#reject').onclick=guard(()=>save({status:'rejected'}).then(()=>toast('Rejected.')));
+  $('#title').onchange=guard(e=>save({title:e.target.value}));
+  $('#st').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));$('#en').onchange=guard(()=>setTimes(+$('#st').value,+$('#en').value));
+  $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));$('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
+  el.querySelectorAll('[data-n]').forEach(b=>b.onclick=guard(()=>{const [k,d]=b.dataset.n.split(':');k==='st'?setTimes(S.clip.start+ +d,S.clip.end):setTimes(S.clip.start,S.clip.end+ +d)}));
+  $('#layout').onclick=guard(async e=>{const b=e.target.closest('[data-l]');if(!b)return;await save({layout:b.dataset.l});$('#cx').hidden=S.clip.layout!=='crop';markSeg();loadFraming()});
+  $('#res').onclick=guard(async e=>{const b=e.target.closest('[data-r]');if(!b)return;await save({res:+b.dataset.r});markSeg()});
+  $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
+  $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});
+  $('#capon').onchange=guard(e=>save({captions:e.target.checked?1:0}).then(drawCaption));
+  $('#music').onchange=guard(e=>save({music:e.target.value}));$('#sfx1').onchange=guard(e=>save({sfx_intro:e.target.value}));
+}
+function markSeg(){$('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===S.clip.layout));$('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===S.clip.res))}
+function updDur(){const c=S.clip;$('#dur').textContent=`Clip length ${(c.end-c.start).toFixed(1)}s.`+(c.stream_offset?` In the stream it starts at ${fmtLong(c.start+c.stream_offset)}; start and end here count inside the saved excerpt.`:' Captions exist only where speech was heard, about 5 seconds either side of the picked moment.')}
+async function setTimes(s,e){await save({start:s,end:e});$('#st').value=S.clip.start.toFixed(1);$('#en').value=S.clip.end.toFixed(1);
+  await loadCues();drawCues();updDur();const v=$('#pv');v.currentTime=S.clip.start;drawCaption();loadFraming()}
+function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;let lo=0,hi=p.length-1;
+  while(hi-lo>1){const m=(lo+hi)>>1;p[m][0]<=t?lo=m:hi=m}
+  const a=p[lo],b=p[hi];if(t<=a[0])return a[1];if(t>=b[0])return b[1];return a[1]+(b[1]-a[1])*(t-a[0])/Math.max(b[0]-a[0],1e-6)}
+function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip;
+  v.style.objectFit=c.layout==='blur'?'contain':'cover';
+  let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
+  v.style.objectPosition=(x*100)+'% 50%'}
+function sizePhone(){const p=$('#phone');if(p)p.style.setProperty('--w',Math.min(236,$('#editor').clientWidth-80)+'px')}
+function playClip(){const v=$('#pv');if(!v.paused){v.pause();return}if(v.currentTime<S.clip.start||v.currentTime>=S.clip.end-.05)v.currentTime=S.clip.start;v.play()}
+function onTime(){const v=$('#pv');if(!v||!S.clip)return;if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption()}
+function drawCaption(){
+  const v=$('#pv'),cap=$('#cap'),c=S.clip;if(!v||!cap||!c)return;
+  const t=S.tpl[c.template];if(!t||!c.captions){cap.innerHTML='';return}
+  const rel=v.currentTime-c.start,cue=S.cues.find(q=>rel>=q.start-.001&&rel<q.end);
+  if(!cue){cap.innerHTML='';return}
+  let act=0;cue.words.forEach((w,i)=>{if(rel>=w.start-.001)act=i});
+  const W=$('#phone').clientWidth,k=W/1080;
+  const words=t.mode==='word'?[[cue.words[act],act]]:cue.words.map((w,i)=>[w,i]);
+  const html=words.map(([w,i])=>{const on=i===act;const sc=t.scale_active&&on?`transform:scale(${t.scale_active/100});`:'';
+    return `<span style="color:${on?t.active:t.primary};${sc}">${esc(t.upper?w.w.toUpperCase():w.w)}</span>`}).join(' ');
+  cap.style.cssText=`bottom:${(t.mv/1920*100).toFixed(1)}%;font:${t.bold?800:400} ${(t.size*k).toFixed(1)}px/1.15 Arial,Helvetica,sans-serif;text-shadow:${t.box?'none':tplShadow(t,k)}${t.glow?',0 0 '+(10*k*4).toFixed(0)+'px '+t.outline:''}`;
+  cap.innerHTML=t.box?`<span style="background:#000b;padding:.1em .35em;border-radius:4px">${html}</span>`:html;
+}
+function drawCues(){
+  $('#cues').innerHTML=S.cues.length?S.cues.map((q,i)=>`<div class="cue"><span>${fmt(q.start)}.${Math.floor(q.start%1*10)}</span><input data-q="${i}" value="${esc(q.text)}" aria-label="Caption at ${fmt(q.start)}"></div>`).join(''):'<p class="muted small">No speech was found inside this clip, so there are no captions to edit.</p>';
+  $('#cues').querySelectorAll('input').forEach(inp=>{
+    inp.onfocus=()=>{const q=S.cues[+inp.dataset.q],v=$('#pv');v.pause();v.currentTime=S.clip.start+q.start+.01;drawCaption()};
+    inp.onchange=guard(async()=>{const q=S.cues[+inp.dataset.q];S.cues=await send('PATCH','/api/clips/'+S.cid+'/cue',{first:q.first,last:q.last,text:inp.value});drawCues();drawCaption();toast('Caption updated.')})});
+}
+function updateApproveUI(){
+  const b=$('#approve');if(!b||!S.clip)return;const c=S.clip,fill=b.querySelector('.fill'),lab=b.querySelector('span');
+  const rs=c.render_status,busy=rs==='queued'||rs==='running';
+  b.disabled=busy;fill.style.width=busy?Math.max(6,c.render_progress||0)+'%':'0';
+  let txt;
+  if(busy)txt=rs==='queued'?'Waiting…':`Preparing ${Math.round(c.render_progress||0)}%`;
+  else if(rs==='failed')txt='Try again';
+  else if(c.status==='approved'&&c.rendered&&rs==='done')txt=c.downloaded?'Saved ✓  Download again':'Download';
+  else txt='Approve and download';
+  if(lab.dataset.t!==txt){lab.dataset.t=txt;lab.innerHTML=txt.includes('✓')?txt.replace('✓','<b class="check">✓</b>'):esc(txt)}
+  const err=$('#rerr');if(rs==='failed'&&!err){const e=document.createElement('p');e.id='rerr';e.className='small';e.style.cssText='color:var(--low);margin:0';e.textContent=c.render_error||'The clip could not be made.';$('#editor .edbody').appendChild(e)}
+  else if(rs!=='failed'&&err)err.remove();
+}
+document.addEventListener('keydown',e=>{
+  if(!S.clip||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
+  if(e.code==='Space'){e.preventDefault();playClip()}if(e.key==='['){$('#stNow').click()}if(e.key===']'){$('#enNow').click()}
+});
+window.addEventListener('resize',()=>{sizePhone();drawCaption();if($('#mapbox'))$('#mapbox').dataset.s='';drawMap()});
+
+/* ---------------- settings ---------------- */
+$('#setBtn').onclick=guard(async()=>{S.settings=await api('/api/settings');$('#s_model').value=S.settings.model;$('#s_key').value='';
+  $('#s_state').textContent=S.settings.ai?(S.settings.ai_from_env?'AI scoring is on (key from the computer settings).':'AI scoring is on.'):'AI scoring is off.';$('#settings').showModal()});
+$('#s_close').onclick=()=>$('#settings').close();
+$('#s_save').onclick=guard(async()=>{const b={model:$('#s_model').value};if($('#s_key').value.trim())b.anthropic_key=$('#s_key').value.trim();
+  S.settings=await send('POST','/api/settings',b);$('#s_key').value='';$('#s_state').textContent=S.settings.ai?'Saved. AI scoring is on.':'Saved. AI scoring is off.'});
+$('#s_test').onclick=guard(async()=>{$('#s_state').textContent='Testing…';try{await send('POST','/api/settings/test');$('#s_state').textContent='The key works.'}catch(e){$('#s_state').textContent=e.message}});
+
+/* ---------------- polling ---------------- */
+let busyTick=false;
+async function tick(){
+  if(busyTick)return;busyTick=true;
+  try{
+    S.videos=await api('/api/videos');
+    if(S.vid){const v=S.videos.find(x=>x.id===S.vid);if(v){S.video=v;await loadClips()}else{S.vid=null;S.video=null;S.clips=[];S.mstate=''}}
+    drawRail();updateMain();pollLive();
+  }catch(e){}finally{busyTick=false}
+}
+(async()=>{
+  S.tpl=await api('/api/templates');S.audio=await api('/api/audio');S.clients=await api('/api/clients');
+  try{$('#signout').hidden=!(await api('/api/me')).auth}catch{}
+  try{const h=await api('/api/health');const m=[];
+    if(!h.ffmpeg)m.push("FFmpeg isn't installed on this computer, so videos can't be imported or rendered. Run Install-Windows.bat.");
+    if(!h.whisper)m.push("Speech recognition isn't installed, so captions can't be made.");
+    if(!h.faces)m.push("Face tracking isn't available (install opencv-python-headless below version 5), so clips use a center crop.");
+    if(!h.yt_dlp)m.push("yt-dlp is missing, so links won't import (uploading files still works).");
+    if(!h.streamlink)m.push("Streamlink is missing, so live streams can't be recorded.");
+    if(m.length){$('#banner').textContent=m.join(' ');$('#banner').hidden=false}}catch{}
+  drawClientBar();S.mstate='none';drawMain();await tick();setInterval(tick,1200);
+})();
+</script>
+</body>
+</html>
