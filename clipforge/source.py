@@ -6,6 +6,10 @@ from .util import which
 _PCT = re.compile(r"\[download\]\s+([\d.]+)%")
 
 
+def _fmt(h):
+    return f"bv*[vcodec^=avc1][height<={h}]+ba[ext=m4a]/bv*[height<={h}]+ba/b[height<={h}]/b"
+
+
 def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progress=None):
     """Returns (path_to_mp4, info_dict_or_None). on_progress(0..1) is called while downloading."""
     ytdlp = which("yt-dlp")
@@ -14,8 +18,7 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
     vid = (r.stdout.strip().splitlines() or ["video"])[0]
     base = os.path.join(outdir, f"source_{vid}_{max_height}")
     if not os.path.exists(base + ".mp4"):
-        fmt = (f"bv*[vcodec^=avc1][height<={max_height}]+ba[ext=m4a]/bv*[height<={max_height}]+ba/"
-               f"b[height<={max_height}]/b")
+        fmt = _fmt(max_height)
         job.log(f"Downloading up to {max_height}p...")
         state = {"parts": 0}
 
@@ -33,6 +36,16 @@ def download(job, url, outdir, max_height=1080, cookies_browser=None, on_progres
         with open(base + ".info.json", encoding="utf-8") as f:
             info = json.load(f)
     return base + ".mp4", info
+
+
+def download_section(job, url, out, start, end, max_height=1080, cookies_browser=None):
+    """Only start..end seconds of a link at full quality. The cut is exact, so the file starts at `start`."""
+    if not os.path.exists(out):
+        extra = ["--cookies-from-browser", cookies_browser] if cookies_browser else []
+        job.run([which("yt-dlp"), "-f", _fmt(max_height), "--merge-output-format", "mp4", "--no-playlist",
+                 "--download-sections", f"*{start:.2f}-{end:.2f}", "--force-keyframes-at-cuts",
+                 "-o", out] + extra + [url])
+    return out
 
 
 def youtube_chat(url, base, cookies_browser=None):
