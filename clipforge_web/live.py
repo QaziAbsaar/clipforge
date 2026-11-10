@@ -212,14 +212,15 @@ class Live:
         while not self.stopped:
             time.sleep(1.0)
             ended = self.src.poll() is not None and self.seg.poll() is not None
-            if self.src.poll() is not None and not self.segs and self.seg.poll() is not None:
+            new = self._read_segments()                        # read before judging, a short stream may be done
+            if ended and not self.segs:
                 try:
                     tail = open(os.path.join(self.dir, "source.log"), errors="replace").read()[-300:].strip()
                 except Exception:
                     tail = ""
                 self._fail("Couldn't open the stream. Is the channel live? " + tail)
                 return
-            for name, s, e in self._read_segments():
+            for name, s, e in new:
                 if self.t0 is None:
                     self.t0 = time.time() - (e - s)
                     self.state = "recording"
