@@ -33,8 +33,19 @@ def _token():
     return hmac.new(SECRET, b"clipforge-session", hashlib.sha256).hexdigest()
 
 
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+
+
 @app.middleware("http")
 async def auth(request: Request, call_next):
+    host = request.headers.get("host", "")
+    # Without a password only this computer may talk to the app. Checking Host stops DNS-rebinding sites.
+    if not PASSWORD and host.rsplit(":", 1)[0] not in LOCAL_HOSTS:
+        return JSONResponse({"detail": "ClipForge only accepts requests from this computer."}, status_code=403)
+    # Stop other websites from sending forms or uploads here (a browser always sends Origin on cross-site POSTs).
+    origin = request.headers.get("origin")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and origin and origin.split("://", 1)[-1] != host:
+        return JSONResponse({"detail": "Request from another website was blocked."}, status_code=403)
     if PASSWORD and request.url.path not in ("/login", "/api/login", "/healthz"):
         if not hmac.compare_digest(request.cookies.get("cf_session", ""), _token()):
             if request.url.path.startswith("/api/"):
