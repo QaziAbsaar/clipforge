@@ -5,9 +5,9 @@ import numpy as np
 from clipforge import ai, analyze, audiolib, captions, faces
 from clipforge.render import RES, render_clip
 from clipforge.segments import HOOK_WORDS, snap, text_score
-from clipforge.source import download, youtube_chat
+from clipforge.source import download, download_section, youtube_chat
 from clipforge.transcribe import load_json, transcribe_file
-from clipforge.util import probe, which
+from clipforge.util import Cancelled, probe, which
 from . import db
 
 
@@ -46,9 +46,14 @@ def ingest(job, video_id, params):
     title = v["title"]
     prog(video_id, 0, "Getting your video")
     if v["source"].startswith(("http://", "https://")):
-        path, info = download(job, v["source"], vdir(video_id), int(params.get("max_height") or 1080),
+        hd = int(params.get("max_height") or 1080)
+        quick = bool(params.get("quick"))     # small copy to find clips; full quality fetched per clip at render
+        path, info = download(job, v["source"], vdir(video_id), 360 if quick else hd,
                               params.get("cookies_browser") or None,
-                              on_progress=lambda f: prog(video_id, f * 95, "Downloading the video"))
+                              on_progress=lambda f: prog(video_id, f * 95, "Downloading a quick copy" if quick
+                                                         else "Downloading the video"))
+        db.ex("update videos set hd=?, cookies=? where id=?",
+              (hd if quick else 0, params.get("cookies_browser") or None, video_id))
         title = (info or {}).get("title") or title
         if "youtube.com" in v["source"] or "youtu.be" in v["source"]:
             prog(video_id, 96, "Reading the chat replay")
@@ -353,6 +358,30 @@ def framing(clip, video):
             "pts": [[p[0], round(p[1] / room, 4)] for p in t["pts"]]}
 
 
+def _hd_part(job, c, v, info, track):
+    """Quick-copy videos: fetch just this clip in full quality and move the face boxes to its size.
+    Returns None (render from the quick copy) if the link no longer works."""
+    out = os.path.join(vdir(v["id"]), f"hd_{c['id']}_{c['start']:.2f}_{c['end']:.2f}.mp4")
+    job.log(f"Getting this part in {v['hd']}p...")
+    try:
+        download_section(job, v["source"], out, c["start"], c["end"], v["hd"], v["cookies"])
+        p = probe(which("ffprobe"), out)
+    except Cancelled:
+        raise
+    except Exception as e:
+        job.log(f"Couldn't get the full-quality part ({str(e)[:200]}). Using the quick copy instead.")
+        return None
+    k = p["w"] / v["w"]
+    if track:
+        track = dict(track)
+        for key in ("cam", "box"):
+            if track.get(key):
+                track[key] = [int(n * k) // 2 * 2 for n in track[key]]
+        if track.get("pts"):
+            track["pts"] = [[t, x * k] for t, x in track["pts"]]
+    return out, 0.0, c["end"] - c["start"], {**info, "w": p["w"], "h": p["h"], "fps": p["fps"]}, track
+
+
 def render(job, clip_id, p):
     c = db.q("select * from clips where id=?", (clip_id,), one=True)
     v = db.q("select * from videos where id=?", (c["video_id"],), one=True)
@@ -387,6 +416,9 @@ def render(job, clip_id, p):
     if layout == "follow" and wide:
         track = get_track(job, c, v)
         job.log(f"Face found in {track['found']:.0%} of the clip.")
+    src, start, end = clip_source(c, v), c["start"], c["end"]
+    if v["hd"] and not c["src"]:
+        src, start, end, info, track = _hd_part(job, c, v, info, track) or (src, start, end, info, track)
     setp(0.12)
     dur = c["end"] - c["start"]
     sfx = []
@@ -395,7 +427,7 @@ def render(job, clip_id, p):
         sfx.append((path, 0.0, 0.7))
     music = audiolib.resolve("music", c["music"])
     job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
-    render_clip(job, ffmpeg, clip_source(c, v), info, c["start"], c["end"], ass, out, layout, c["crop_x"],
+    render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
                 res=c["res"], music=music, music_vol=0.18, duck=True, sfx=sfx, track=track,
                 on_progress=lambda f: setp(0.12 + 0.88 * f))
     db.ex("update clips set render_status='done', render_progress=100, render_path=? where id=?", (out, clip_id))
