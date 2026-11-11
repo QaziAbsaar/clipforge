@@ -358,7 +358,7 @@ function buildEditor(){
    <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><canvas id="stackcv" width="270" height="480" hidden></canvas><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
    <div class="row"><button id="play">Play</button><label style="margin:0" class="fit"><input type="checkbox" id="loop" checked> Loop</label><label style="margin:0" class="fit"><input type="checkbox" id="snd"> Sound</label></div>
    <div><label>Trim: drag the ends, click to jump</label><div class="trim"><div class="trk" id="trk"><svg id="twave" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
-     <div class="sel" id="tsel"><i data-h="s" title="Drag to set the start"></i><i data-h="e" title="Drag to set the end"></i></div><div class="ph" id="tph"></div></div>
+     <div class="sel" id="tsel"><i data-h="s" title="Drag to set the start"></i><i data-h="e" title="Drag to set the end"></i></div><div id="tsfx"></div><div class="ph" id="tph"></div></div>
      <div class="row muted small" style="margin-top:3px"><span id="tlo"></span><span id="tlen" style="text-align:center"></span><span id="thi" style="text-align:right"></span></div></div></div>
    <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
    <div><label>Framing</label><div class="seg" id="layout"><button data-l="pip">Facecam over gameplay</button><button data-l="stack">Facecam + gameplay split</button><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
@@ -367,7 +367,11 @@ function buildEditor(){
      <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
    <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
    <div class="row"><div><label for="music">Music</label><select id="music">${optList(S.audio.music,c.music,'None')}</select></div>
-     <div><label for="sfx1">Sound effect</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div></div>
+     <div><label for="sfx1">Intro sound</label><select id="sfx1">${optList(S.audio.sfx,c.sfx_intro,'None')}</select></div></div>
+   <div><label>Sound effects</label>
+     <div class="row"><button id="sfxAuto" class="primary fit">Auto-add effects</button><select id="sfxPick" aria-label="Effect to add">${optList(S.audio.sfx,'whoosh.wav')}</select><button id="sfxAdd" class="fit">Add at playhead</button></div>
+     <p class="muted small" style="margin:6px 0 0">Auto-add puts a whoosh at the start, a riser and boom on the big moment and pops on reaction words. Turn on Sound to hear them in the preview.</p>
+     <div id="sfxList"></div></div>
    <div class="tm"><div><label for="st">Start (s)</label><input id="st" type="number" step="0.1" value="${c.start.toFixed(1)}"><div class="nudge"><button data-n="st:-1">−1</button><button data-n="st:-.5">−.5</button><button data-n="st:.5">+.5</button><button id="stNow">Playhead</button></div></div>
      <div><label for="en">End (s)</label><input id="en" type="number" step="0.1" value="${c.end.toFixed(1)}"><div class="nudge"><button data-n="en:-.5">−.5</button><button data-n="en:.5">+.5</button><button data-n="en:1">+1</button><button id="enNow">Playhead</button></div></div></div>
    <p class="muted small" id="dur" style="margin:0"></p>
@@ -378,7 +382,7 @@ function buildEditor(){
   const v=$('#pv');v.src='/api/clips/'+c.id+'/source#t='+c.start;
   v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();applyLayout();drawTrim()});
   v.addEventListener('timeupdate',onTime);v.addEventListener('seeked',()=>{drawCaption();applyLayout()});
-  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();drawPh();if(!v.paused)requestAnimationFrame(loop)})()});
+  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();drawPh();sfxTick();if(!v.paused)requestAnimationFrame(loop)})()});
   v.addEventListener('pause',()=>$('#play').textContent='Play');
   sizePhone();markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();
   $('#close').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
@@ -394,10 +398,30 @@ function buildEditor(){
   $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
   $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});
   $('#capon').onchange=guard(e=>save({captions:e.target.checked?1:0}).then(drawCaption));
-  $('#music').onchange=guard(e=>save({music:e.target.value}));$('#sfx1').onchange=guard(e=>save({sfx_intro:e.target.value}));
+  $('#music').onchange=guard(e=>save({music:e.target.value}));
+  $('#sfxAuto').onclick=guard(async()=>{const c=await send('POST','/api/clips/'+S.cid+'/sfx/auto');Object.assign(S.clip,c);drawSfx();await loadClips();updateApproveUI();
+    toast(c.sfx.length?`Added ${c.sfx.length} effects.`:'No effects found in the library.')});
+  $('#sfxAdd').onclick=guard(()=>saveSfx([...S.clip.sfx,{f:$('#sfxPick').value,t:+$('#pv').currentTime.toFixed(2),v:.7}]));
+  $('#sfxList').onchange=guard(e=>{const i=+e.target.closest('[data-i]').dataset.i,l=S.clip.sfx.map(x=>({...x}));
+    if(e.target.dataset.k==='f')l[i].f=e.target.value;else if(e.target.dataset.k==='t')l[i].t=S.clip.start+(+e.target.value);else l[i].v=+e.target.value;return saveSfx(l)});
+  $('#sfxList').onclick=guard(e=>{const b=e.target.closest('button');if(!b)return;const i=+b.closest('[data-i]').dataset.i,x=S.clip.sfx[i];
+    if(b.dataset.a==='del')return saveSfx(S.clip.sfx.filter((_,j)=>j!==i));
+    if(b.dataset.a==='play')playSfx(x);if(b.dataset.a==='go'){$('#pv').currentTime=x.t;drawPh()}});
+  drawSfx();$('#sfx1').onchange=guard(e=>save({sfx_intro:e.target.value}));
 }
 function markSeg(){$('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===S.clip.layout));$('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===S.clip.res))}
 function updDur(){const c=S.clip;$('#dur').textContent=`Clip length ${(c.end-c.start).toFixed(1)}s.`+(c.stream_offset?` In the stream it starts at ${fmtLong(c.start+c.stream_offset)}; start and end here count inside the saved excerpt.`:' Captions exist only where speech was heard, about 5 seconds either side of the picked moment.')}
+async function saveSfx(list){await save({sfx:list});drawSfx()}
+function playSfx(x){try{const a=new Audio('/api/audio/sfx/'+encodeURIComponent(x.f));a.volume=Math.min(1,x.v);a.play()}catch{}}
+function drawSfx(){const box=$('#sfxList');if(!box||!S.clip)return;const c=S.clip,l=c.sfx||[];
+  box.innerHTML=l.map((x,i)=>{const out=x.t<c.start||x.t>=c.end;return `<div class="sfxi${out?' out':''}" data-i="${i}" ${out?'title="Outside the clip, so it is not used"':''}>
+    <button data-a="play" title="Listen" aria-label="Listen">▶</button><select data-k="f" aria-label="Effect">${optList(S.audio.sfx,x.f)}</select>
+    <input data-k="t" type="number" step="0.1" value="${(x.t-c.start).toFixed(1)}" aria-label="Seconds into the clip" title="Seconds into the clip">
+    <input data-k="v" type="range" min="0" max="1.5" step="0.05" value="${x.v}" aria-label="Volume" title="Volume">
+    <button data-a="go" title="Jump here" aria-label="Jump here">⌖</button><button data-a="del" title="Remove" aria-label="Remove">✕</button></div>`}).join('');
+  drawTrim()}
+function sfxTick(){const v=$('#pv');if(!v||!S.clip)return;const t=v.currentTime,p=S.lastT??t;S.lastT=t;
+  if(v.paused||v.muted||t<p||t-p>.5)return;(S.clip.sfx||[]).forEach(x=>{if(x.t>p&&x.t<=t)playSfx(x)})}
 const T={lo:0,hi:1,drag:false};
 function tlTotal(){const v=$('#pv');return v&&isFinite(v.duration)&&v.duration>0?v.duration:(S.video&&S.video.duration)||S.clip.end+30}
 function drawTrim(s,e){
@@ -411,6 +435,7 @@ function drawTrim(s,e){
   else{const n=c.v.length,dur=S.video.duration||1,p=[];
     for(let i=0;i<=80;i++){const t=T.lo+(T.hi-T.lo)*i/80,y=c.v[Math.min(n-1,Math.floor(t/dur*n))]||0;p.push((i/80*100).toFixed(2)+','+(30-y*26).toFixed(2))}
     svg.innerHTML=`<path d="M0,30 L${p.join(' L')} L100,30 Z" fill="#8c9bff40"/>`}
+  $('#tsfx').innerHTML=(S.clip.sfx||[]).filter(x=>x.t>=T.lo&&x.t<=T.hi).map(x=>`<i style="left:${X(x.t)}%" title="${esc(x.f)}"></i>`).join('');
   drawPh()}
 function drawPh(){const v=$('#pv'),p=$('#tph');if(!v||!p)return;const t=v.currentTime;p.hidden=t<T.lo||t>T.hi;p.style.left=(t-T.lo)/(T.hi-T.lo)*100+'%'}
 function trimEvents(){
