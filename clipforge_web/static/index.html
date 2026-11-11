@@ -9,7 +9,7 @@
 <body>
 <header>
   <div class="brand">Clip<i>Forge</i></div>
-  <div class="row fit"><button id="setBtn" class="ghost">Settings</button><button id="signout" class="ghost" hidden>Sign out</button></div>
+  <div class="row fit"><button id="libBtn" class="ghost">Your videos</button><button id="setBtn" class="ghost">Settings</button><button id="signout" class="ghost" hidden>Sign out</button></div>
 </header>
 <div id="banner" hidden></div>
 
@@ -183,14 +183,31 @@ $('#vlist').addEventListener('click',guard(async e=>{
 }));
 
 /* ---------------- main area ---------------- */
-function mstateOf(v){if(!v)return 'none';if(v.kind==='live'&&v.status==='live')return 'live';
+const myVideos=()=>S.videos.filter(v=>S.client==null||v.client_id===S.client);
+function mstateOf(v){if(!v)return myVideos().length?'lib':'none';if(v.kind==='live'&&v.status==='live')return 'live';
   if(v.status==='importing'||v.status==='analyzing')return 'busy';if(v.status==='error')return 'error';return 'ready'}
 async function selectVideo(id){
   S.vid=id;S.cid=null;S.clip=null;S.sel=new Set();S.mstate='';showEditor(false);
   S.video=S.videos.find(v=>v.id===id)||await api('/api/videos/'+id);await loadClips();drawRail();updateMain();
 }
+function goLib(){S.vid=null;S.video=null;S.cid=null;S.clip=null;S.clips=[];S.mstate='';showEditor(false);drawRail();updateMain()}
+$('#libBtn').onclick=goLib;
+function drawLib(){
+  const box=$('#lib');if(!box)return;
+  sync(box,myVideos(),v=>v.id,v=>[v.title,v.status,Math.round(v.progress),v.clips,v.approved,v.duration].join('|'),v=>{
+    const busy=v.status==='importing'||v.status==='analyzing';
+    return `<div class="th"><img src="/api/videos/${v.id}/thumb?s=${v.status}" loading="lazy" alt="" onerror="this.remove()">
+      ${v.duration?`<span class="dur">${fmtLong(v.duration)}</span>`:''}${v.status==='live'?'<span class="livebadge"><i></i>LIVE</span>':''}</div>
+      <div class="b"><div class="t">${esc(v.title||v.source)}</div>
+      <div class="muted small" style="margin-top:4px">${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'?'Needs attention':'No clips yet'}</div>
+      ${busy?`<div class="bar" style="margin-top:7px"><i style="width:${Math.max(4,v.progress)}%"></i></div>`:''}</div>`},'vcard',
+    el=>{el.setAttribute('role','button');el.tabIndex=0});
+}
 function drawMain(){
   const m=$('#main'),v=S.video,st=S.mstate;
+  if(st==='lib'){m.innerHTML=`<h1 style="font-size:23px">Your videos</h1><p class="muted small" style="margin:3px 0 0">Links and files you added. Open one to see every clip made from it.</p><div id="lib" class="lib"></div>`;
+    $('#lib').onclick=e=>{const c=e.target.closest('.vcard');if(c)selectVideo(+c.dataset.k)};
+    $('#lib').onkeydown=e=>{const c=e.target.closest('.vcard');if(c&&e.key==='Enter')selectVideo(+c.dataset.k)};drawLib();return}
   if(st==='none'){m.innerHTML=`<div class="empty"><h1>Find the moments worth posting</h1>
     <p>Add a video or go live. ClipForge listens for loud moments, crowd and chat reactions, follows the face, and gives you ranked clips with captions.</p>
     <div class="steps"><div><b>1. Add</b>A link, a file, or a live stream.</div><div><b>2. Review</b>Best clips come first, with the reason.</div><div><b>3. Approve</b>It's made and saved to your Downloads.</div></div></div>`;return}
@@ -204,7 +221,7 @@ function drawMain(){
     $('#errmsg').textContent=v.error||'Something went wrong.';
     $('#retryV').onclick=guard(async()=>{await send('POST','/api/videos/'+S.vid+'/retry',{clips:+$('#a_clips').value,length:+$('#a_len').value});await tick()});return}
   const live=st==='live',isLive=v.kind==='live';
-  m.innerHTML=`<div id="vhead"></div>
+  m.innerHTML=`<button class="ghost small" id="backLib" style="margin-bottom:8px">← All videos</button><div id="vhead"></div>
     ${live?`<div class="card live" id="liveBox"><div class="row"><span class="livebadge fit"><i></i>LIVE</span><strong id="lv_ch" style="flex:1"></strong><span id="lv_time" class="muted fit"></span></div>
       <div class="meters"><div><label>Sound</label><svg viewBox="0 0 120 40" preserveAspectRatio="none"><path id="sp_a" stroke="#8c9bff"/></svg></div>
         <div><label>Chat</label><svg viewBox="0 0 120 40" preserveAspectRatio="none"><path id="sp_c" stroke="#5fe3c0"/></svg></div></div>
@@ -219,6 +236,7 @@ function drawMain(){
     <div class="card map" id="mapbox" style="margin-top:14px"></div>
     <div class="row" style="margin-bottom:2px"><h2 id="clipcount" style="flex:1"></h2><button id="appSel">Approve selected</button></div>
     <div id="cands"></div>`;
+  $('#backLib').onclick=goLib;
   if($('#find')){const upd=()=>{const L=+$('#f_len').value||30;$('#fitnote').textContent=`At ${L} seconds each, this video fits up to ${Math.max(1,Math.floor((S.video.duration||0)/L))} clips.`};
     $('#f_len').oninput=upd;upd();$('#find').onclick=guard(findAgain)}
   if(live){$('#lv_clip').onclick=guard(async()=>{await send('POST','/api/live/'+S.vid+'/clip');toast('Cutting that moment…')});
@@ -237,6 +255,7 @@ function metaLine(v){return v.duration?`${fmtLong(v.duration)} · ${v.w||'?'}×$
 function updateMain(){
   const v=S.video,st=mstateOf(v);
   if(st!==S.mstate){S.mstate=st;drawMain()}
+  if(st==='lib')drawLib();
   if(!v)return;
   if(st==='busy'){swapText($('#stage'),v.stage||'Working');$('#pct').textContent=Math.round(v.progress);$('#pbar').style.width=Math.max(3,v.progress)+'%';$('#vtitle').textContent=v.title||''}
   if(st==='error'&&$('#errmsg'))$('#errmsg').textContent=v.error||'Something went wrong.';
@@ -282,6 +301,7 @@ function drawCands(){
     return `<input type="checkbox" data-sel="${k.id}" ${S.sel.has(k.id)?'checked':''} aria-label="Select clip">
       <div class="rank">#${ranks.get(k.id)}</div>
       <div class="ring"><svg viewBox="0 0 52 52"><circle class="bg" cx="26" cy="26" r="21"/><circle class="fg" cx="26" cy="26" r="21" stroke="${scoreCol(k.score)}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-k.score)}"/></svg><b style="color:${scoreCol(k.score)}">${pct}</b></div>
+      <img class="cth" src="/api/clips/${k.id}/thumb?t=${k.start.toFixed(1)}_${k.end.toFixed(1)}" loading="lazy" alt="" onerror="this.style.visibility='hidden'">
       <div style="min-width:0"><div class="ti">${esc(k.title)}</div><div class="muted small">${fmt(k.start+(k.stream_offset||0))}–${fmt(k.end+(k.stream_offset||0))} · ${Math.round(k.end-k.start)}s ${stateBadge(k)}</div></div>
       <div class="mini">${bar('Sound',sc.audio)}${bar('Action',sc.motion)}${bar('Speech',sc.speech)}${bar('Chat',sc.chat)}${bar('Replays',sc.heat)}${bar('AI',sc.ai)}</div>
       ${(k.render_status==='running'||k.render_status==='queued')?`<div class="cprog"><i style="width:${Math.max(4,k.render_progress||0)}%"></i></div>`:''}`},'cand',
@@ -337,6 +357,9 @@ function buildEditor(){
    <div class="row"><h2 style="flex:1">Edit clip</h2><button id="close" class="ghost" aria-label="Close editor">✕</button></div>
    <div class="phone" id="phone"><video id="pv" playsinline preload="auto" muted></video><canvas id="stackcv" width="270" height="480" hidden></canvas><div id="cap"></div><div class="facehint" id="facehint" hidden></div></div>
    <div class="row"><button id="play">Play</button><label style="margin:0" class="fit"><input type="checkbox" id="loop" checked> Loop</label><label style="margin:0" class="fit"><input type="checkbox" id="snd"> Sound</label></div>
+   <div><label>Trim: drag the ends, click to jump</label><div class="trim"><div class="trk" id="trk"><svg id="twave" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+     <div class="sel" id="tsel"><i data-h="s" title="Drag to set the start"></i><i data-h="e" title="Drag to set the end"></i></div><div class="ph" id="tph"></div></div>
+     <div class="row muted small" style="margin-top:3px"><span id="tlo"></span><span id="tlen" style="text-align:center"></span><span id="thi" style="text-align:right"></span></div></div></div>
    <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
    <div><label>Framing</label><div class="seg" id="layout"><button data-l="pip">Facecam over gameplay</button><button data-l="stack">Facecam + gameplay split</button><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
      <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${['crop','stack','pip'].includes(c.layout)?'':'hidden'} aria-label="Crop position"></div>
@@ -353,11 +376,11 @@ function buildEditor(){
   </div><div class="edfoot"><button id="reject" class="ghost">Reject</button><button id="approve" class="primary"><i class="fill"></i><span></span></button></div></div>`;
   $('#tpls').innerHTML=Object.entries(S.tpl).map(([n,t])=>`<button class="style ${n===c.template?'on':''}" data-t="${n}"><span class="s" style="color:${t.active};text-shadow:${t.box?'none':tplShadow(t,.08)};${t.box?'background:#000b;border-radius:4px;padding:0 4px':''}">${t.upper?'WORD':'Word'}</span><small>${n.replace(/_/g,' ')}</small></button>`).join('');
   const v=$('#pv');v.src='/api/clips/'+c.id+'/source#t='+c.start;
-  v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();applyLayout()});
+  v.addEventListener('loadedmetadata',()=>{v.currentTime=S.clip.start;drawCaption();applyLayout();drawTrim()});
   v.addEventListener('timeupdate',onTime);v.addEventListener('seeked',()=>{drawCaption();applyLayout()});
-  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();if(!v.paused)requestAnimationFrame(loop)})()});
+  v.addEventListener('play',()=>{$('#play').textContent='Pause';(function loop(){drawCaption();applyLayout();drawPh();if(!v.paused)requestAnimationFrame(loop)})()});
   v.addEventListener('pause',()=>$('#play').textContent='Play');
-  sizePhone();markSeg();drawCues();updateApproveUI();updDur();
+  sizePhone();markSeg();drawCues();updateApproveUI();updDur();drawTrim();trimEvents();
   $('#close').onclick=()=>{S.cid=null;S.clip=null;showEditor(false);drawCands();drawMap()};
   $('#play').onclick=playClip;$('#snd').onchange=e=>v.muted=!e.target.checked;
   $('#approve').onclick=guard(()=>approve(S.cid));
@@ -375,7 +398,33 @@ function buildEditor(){
 }
 function markSeg(){$('#layout').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.l===S.clip.layout));$('#res').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.r===S.clip.res))}
 function updDur(){const c=S.clip;$('#dur').textContent=`Clip length ${(c.end-c.start).toFixed(1)}s.`+(c.stream_offset?` In the stream it starts at ${fmtLong(c.start+c.stream_offset)}; start and end here count inside the saved excerpt.`:' Captions exist only where speech was heard, about 5 seconds either side of the picked moment.')}
-async function setTimes(s,e){await save({start:s,end:e});$('#st').value=S.clip.start.toFixed(1);$('#en').value=S.clip.end.toFixed(1);
+const T={lo:0,hi:1,drag:false};
+function tlTotal(){const v=$('#pv');return v&&isFinite(v.duration)&&v.duration>0?v.duration:(S.video&&S.video.duration)||S.clip.end+30}
+function drawTrim(s,e){
+  if(!$('#trk')||!S.clip)return;s=s??S.clip.start;e=e??S.clip.end;
+  if(!T.drag){const pad=Math.max(10,(S.clip.end-S.clip.start)*.6);T.lo=Math.max(0,S.clip.start-pad);T.hi=Math.max(T.lo+1,Math.min(tlTotal(),S.clip.end+pad))}
+  const X=t=>(t-T.lo)/(T.hi-T.lo)*100;
+  $('#tsel').style.left=X(s)+'%';$('#tsel').style.width=Math.max(0,X(e)-X(s))+'%';
+  $('#tlo').textContent=fmtLong(T.lo);$('#thi').textContent=fmtLong(T.hi);$('#tlen').textContent=(e-s).toFixed(1)+'s';
+  const c=S.video&&S.video.curve,svg=$('#twave');
+  if(!c||S.clip.stream_offset)svg.innerHTML='';
+  else{const n=c.v.length,dur=S.video.duration||1,p=[];
+    for(let i=0;i<=80;i++){const t=T.lo+(T.hi-T.lo)*i/80,y=c.v[Math.min(n-1,Math.floor(t/dur*n))]||0;p.push((i/80*100).toFixed(2)+','+(30-y*26).toFixed(2))}
+    svg.innerHTML=`<path d="M0,30 L${p.join(' L')} L100,30 Z" fill="#8c9bff40"/>`}
+  drawPh()}
+function drawPh(){const v=$('#pv'),p=$('#tph');if(!v||!p)return;const t=v.currentTime;p.hidden=t<T.lo||t>T.hi;p.style.left=(t-T.lo)/(T.hi-T.lo)*100+'%'}
+function trimEvents(){
+  const trk=$('#trk'),v=$('#pv');
+  trk.onpointerdown=e=>{
+    const r=trk.getBoundingClientRect(),at=x=>T.lo+(T.hi-T.lo)*Math.min(1,Math.max(0,(x-r.left)/r.width)),h=e.target.dataset.h;
+    if(!h){v.currentTime=at(e.clientX);drawPh();return}
+    e.preventDefault();trk.setPointerCapture(e.pointerId);T.drag=true;let s=S.clip.start,en=S.clip.end;
+    trk.onpointermove=m=>{const t=at(m.clientX);if(h==='s')s=Math.min(t,en-3);else en=Math.max(t,s+3);
+      drawTrim(s,en);$('#st').value=s.toFixed(1);$('#en').value=en.toFixed(1);v.currentTime=h==='s'?s:en};
+    trk.onpointerup=trk.onpointercancel=guard(async()=>{trk.onpointermove=trk.onpointerup=trk.onpointercancel=null;T.drag=false;
+      if(Math.abs(s-S.clip.start)>.05||Math.abs(en-S.clip.end)>.05)await setTimes(+s.toFixed(2),+en.toFixed(2));else drawTrim()})};
+}
+async function setTimes(s,e){await save({start:s,end:e});$('#st').value=S.clip.start.toFixed(1);$('#en').value=S.clip.end.toFixed(1);drawTrim();
   await loadCues();drawCues();updDur();const v=$('#pv');v.currentTime=S.clip.start;drawCaption();loadFraming()}
 function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;let lo=0,hi=p.length-1;
   while(hi-lo>1){const m=(lo+hi)>>1;p[m][0]<=t?lo=m:hi=m}
@@ -394,9 +443,9 @@ function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S
   v.style.objectFit=(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam))?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
   v.style.objectPosition=(x*100)+'% 50%'}
-function sizePhone(){const p=$('#phone');if(p)p.style.setProperty('--w',Math.min(236,$('#editor').clientWidth-80)+'px')}
+function sizePhone(){const p=$('#phone'),w=$('#editor').clientWidth;if(p)p.style.setProperty('--w',(w>260?Math.min(236,w-80):236)+'px')}
 function playClip(){const v=$('#pv');if(!v.paused){v.pause();return}if(v.currentTime<S.clip.start||v.currentTime>=S.clip.end-.05)v.currentTime=S.clip.start;v.play()}
-function onTime(){const v=$('#pv');if(!v||!S.clip)return;if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption()}
+function onTime(){const v=$('#pv');if(!v||!S.clip)return;drawPh();if(v.currentTime>=S.clip.end){if($('#loop').checked){v.currentTime=S.clip.start}else v.pause()}drawCaption()}
 function drawCaption(){
   const v=$('#pv'),cap=$('#cap'),c=S.clip;if(!v||!cap||!c)return;
   const t=S.tpl[c.template];if(!t||!c.captions){cap.innerHTML='';return}
