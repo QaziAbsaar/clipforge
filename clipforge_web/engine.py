@@ -290,6 +290,32 @@ def clip_words(clip):
             if w["start"] >= clip["start"] - 0.01 and w["end"] <= clip["end"] + 0.01]
 
 
+def auto_sfx(clip):
+    """Effects that make a clip hit harder: whoosh in, riser into the big moment, boom on it, pops on reaction words.
+    Times are on the video timeline (like start/end), so trimming never moves them off their moment."""
+    s, dur = clip["start"], clip["end"] - clip["start"]
+    peak = clip["peak"] - s
+    if not 0.5 < peak < dur - 0.3:
+        peak = dur * 0.4
+    out = [{"f": "whoosh.wav", "t": 0.0, "v": 0.5}]
+    if peak > 2:
+        out.append({"f": "riser.wav", "t": peak - 1.5, "v": 0.35})
+    out.append({"f": "boom.wav", "t": peak, "v": 0.8})
+    words = clip_words(clip)
+    toks = [re.sub(r"[^a-z0-9 ]", "", w["w"].lower()) for w in words]
+    last = -9.0
+    for i, w in enumerate(words):
+        said = " ".join(toks[i:i + 3])
+        if (any(said == h or said.startswith(h + " ") for h in HOOK_WORDS) and abs(w["start"] - peak) > 1.5
+                and w["start"] - last >= 2 and 0.3 < w["start"] < dur - 0.3):
+            out.append({"f": "pop.wav", "t": w["start"], "v": 0.6})
+            last = w["start"]
+            if sum(e["f"] == "pop.wav" for e in out) == 3:
+                break
+    return [dict(e, t=round(s + e["t"], 3)) for e in sorted(out, key=lambda e: e["t"])
+            if audiolib.resolve("sfx", e["f"])]
+
+
 def clip_cues(clip):
     return captions.build_cues(clip_words(clip))
 
@@ -425,6 +451,10 @@ def render(job, clip_id, p):
     path = audiolib.resolve("sfx", c["sfx_intro"])
     if path:
         sfx.append((path, 0.0, 0.7))
+    for e in json.loads(c["sfx"] or "[]"):                 # placed effects, stored on the video timeline
+        path = audiolib.resolve("sfx", e["f"])
+        if path and c["start"] <= e["t"] < c["end"]:
+            sfx.append((path, e["t"] - c["start"], e["v"]))
     music = audiolib.resolve("music", c["music"])
     job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
     render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
