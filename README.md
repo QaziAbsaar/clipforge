@@ -25,6 +25,9 @@ A yellow bar at the top tells you if something is missing.
 - Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
   starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
   it stopped until that channel goes offline. At most 6 recordings run at once (set CLIPFORGE_MAX_LIVE to change it).
+- Sound effects in the clip editor: Auto-add places a whoosh at the start, a riser and boom on the big moment and
+  pops on reaction words; add any effect at the playhead and set its time and volume. 11 effects come built in
+  (made by FFmpeg, no copyright); drop your own files into audio_library/sfx.
 - Quick links (default): only a small 360p copy is downloaded to find the clips; each approved clip is then
   fetched in full quality on its own (about 20 MB instead of GBs for a long stream). Pick "Full 1080p" to download
   the whole video instead. If the link stops working, the clip is made from the quick copy.
