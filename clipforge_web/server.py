@@ -1,5 +1,5 @@
 """ClipForge web app: API + the page. Local use: binds to 127.0.0.1 only unless a password is set."""
-import asyncio, hashlib, hmac, json, os, re, shutil, threading
+import asyncio, hashlib, hmac, json, os, re, shutil, subprocess, threading
 from typing import Optional
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from clipforge import ai, audiolib
 from clipforge.captions import TEMPLATES
 from clipforge.render import RES
+from clipforge.util import which
 from . import db, engine, live, worker
 
 app = FastAPI(title="ClipForge")
@@ -426,6 +427,32 @@ def clip_source(cid: int):
     if not p or not os.path.exists(p):
         raise HTTPException(404, "The source video is missing.")
     return FileResponse(p, media_type="video/mp4" if p.endswith(".mp4") else None)
+
+
+def _thumb(src, t, out):
+    """One small JPEG frame at t seconds, made once and kept."""
+    if not os.path.exists(out):
+        if not src or not os.path.exists(src):
+            raise HTTPException(404, "No picture yet.")
+        subprocess.run([which("ffmpeg"), "-v", "error", "-y", "-ss", f"{max(t, 0):.2f}", "-i", src, "-frames:v", "1",
+                        "-vf", "scale=320:-2", "-q:v", "5", out], capture_output=True, timeout=60)
+        if not os.path.exists(out):
+            raise HTTPException(404, "No picture yet.")
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/api/videos/{vid}/thumb")
+def video_thumb(vid: int):
+    v = _video(vid)
+    return _thumb(v["path"], (v["duration"] or 0) * 0.2, os.path.join(engine.wdir(vid), "thumb.jpg"))
+
+
+@app.get("/api/clips/{cid}/thumb")
+def clip_thumb(cid: int):
+    c = _clip(cid)
+    t = (c["start"] + c["end"]) / 2
+    return _thumb(engine.clip_source(c, _video(c["video_id"])), t,
+                  os.path.join(engine.wdir(c["video_id"]), f"thumb_{cid}_{t:.1f}.jpg"))
 
 
 @app.get("/api/clips/{cid}/framing")
