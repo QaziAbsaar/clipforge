@@ -15,7 +15,7 @@ from . import db, engine, live, worker
 app = FastAPI(title="ClipForge")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 EXTS = {".mp4", ".mov", ".mkv", ".webm"}
-CLIP_FIELDS = {"title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "captions", "status"}
+CLIP_FIELDS = {"title", "template", "layout", "res", "crop_x", "music", "sfx_intro", "captions", "status", "sfx"}
 
 
 @app.on_event("startup")
@@ -366,6 +366,7 @@ def _clip_out(c):
     o = {k: v for k, v in c.items() if k not in ("words", "render_path", "track", "src", "cam")}
     o["scores"] = json.loads(c["scores"] or "{}")
     o["reasons"] = json.loads(c["reasons"] or "[]")
+    o["sfx"] = json.loads(c["sfx"] or "[]")
     o["rendered"] = bool(c["render_path"] and os.path.exists(c["render_path"]))
     if c["render_status"] == "failed":
         j = db.q("select error from jobs where type='render' and ref_id=? and status='failed' order by id desc limit 1",
@@ -376,6 +377,29 @@ def _clip_out(c):
 
 @app.get("/api/clips/{cid}")
 def clip(cid: int):
+    return _clip_out(_clip(cid))
+
+
+def _clean_sfx(val):
+    if not isinstance(val, list) or len(val) > 30:
+        raise HTTPException(400, "Up to 30 sound effects per clip.")
+    out = []
+    for e in val:
+        try:
+            f, t, v = str(e["f"]), float(e["t"]), float(e.get("v", 0.6))
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "Each sound effect needs a file and a time.")
+        if not audiolib.resolve("sfx", f):
+            raise HTTPException(400, f"'{f}' isn't in the audio library.")
+        out.append({"f": f, "t": round(max(t, 0), 3), "v": round(min(max(v, 0), 1.5), 2)})
+    return sorted(out, key=lambda e: e["t"])
+
+
+@app.post("/api/clips/{cid}/sfx/auto")
+def auto_sfx(cid: int):
+    c = _clip(cid)
+    db.ex("update clips set sfx=?, render_status=case when render_status='done' then 'stale' else render_status end "
+          "where id=?", (db.dumps(engine.auto_sfx(c)), cid))
     return _clip_out(_clip(cid))
 
 
@@ -400,6 +424,8 @@ def patch_clip(cid: int, body: dict = Body(...)):
         if k in ("music", "sfx_intro") and val not in ("", "random") and not audiolib.resolve(
                 "music" if k == "music" else "sfx", val):
             raise HTTPException(400, f"'{val}' isn't in the audio library.")
+        if k == "sfx":
+            val = db.dumps(_clean_sfx(val))
         sets.append(f"{k}=?")
         vals.append(int(val) if k in ("res", "captions") else (float(val) if k == "crop_x" else val))
     if "start" in body or "end" in body:
@@ -579,6 +605,14 @@ def live_stats(vid: int):
 @app.get("/api/templates")
 def templates():
     return TEMPLATES
+
+
+@app.get("/api/audio/sfx/{name}")
+def sfx_file(name: str):
+    p = audiolib.resolve("sfx", name)
+    if not p:
+        raise HTTPException(404, "No such sound effect.")
+    return FileResponse(p)
 
 
 @app.get("/api/audio")
