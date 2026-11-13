@@ -40,6 +40,10 @@ def clip_source(clip, video):
 
 
 # ---------------- import ----------------
+NO_SOUND = "This video has no sound, so ClipForge can't find its best moments."
+TOO_SHORT = "This video is too short. Use one that is at least 5 seconds long."
+
+
 def ingest(job, video_id, params):
     v = db.q("select * from videos where id=?", (video_id,), one=True)
     os.makedirs(vdir(video_id), exist_ok=True)
@@ -73,7 +77,9 @@ def ingest(job, video_id, params):
           "where id=?", (path, title, p["duration"], p["w"], p["h"], p["fps"], os.path.getsize(path),
                          1 if audio else 0, info_path if os.path.exists(info_path) else None, video_id))
     if not audio:
-        raise RuntimeError("This video has no sound, so ClipForge can't find its best moments.")
+        raise RuntimeError(NO_SOUND)
+    if p["duration"] < 5:
+        raise RuntimeError(TOO_SHORT)
     prog(video_id, 100, "Ready to analyze")
 
 
@@ -145,6 +151,10 @@ def _resolve_overlaps(chosen, min_clip=5.0):
 
 def analyze_video(job, video_id, p):
     v = db.q("select * from videos where id=?", (video_id,), one=True)
+    if v["has_audio"] == 0:
+        raise RuntimeError(NO_SOUND)
+    if (v["duration"] or 0) < 5:
+        raise RuntimeError(TOO_SHORT)
     ffmpeg = which("ffmpeg")
     work = wdir(video_id)
     src, dur, fps = v["path"], v["duration"], v["fps"] or 30
