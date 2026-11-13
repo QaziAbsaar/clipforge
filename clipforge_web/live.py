@@ -1,12 +1,13 @@
 """Live-stream clipping. Records a Twitch/Kick stream in short pieces, watches the sound and the chat in real
-time, and cuts a clip whenever something big happens. Honest limits: Twitch chat is read live; Kick chat is not
+time, and cuts a clip whenever something big happens. Honest limits: Twitch and YouTube chat are read live; Kick chat is not
 supported (sound only); platforms have no "likes" on a live stream, so chat bursts and crowd noise stand in."""
 import collections, csv, json, os, queue, random, re, socket, ssl, subprocess, tempfile, threading, time, traceback
 import numpy as np
 
 from clipforge import analyze
-from clipforge.segments import snap, text_score
+from clipforge.segments import snap, text_score, title_of
 from clipforge.transcribe import load_json, transcribe_file
+from clipforge.source import live_chat_line
 from clipforge.util import probe, which
 from . import db, engine
 
@@ -89,6 +90,52 @@ class TwitchChat(threading.Thread):
         self.stopped = True
 
 
+class YouTubeChat(threading.Thread):
+    """Follows a YouTube live chat through yt-dlp, which keeps writing it to a file while the stream runs."""
+
+    def __init__(self, url):
+        super().__init__(daemon=True)
+        self.url, self.events, self.error, self.connected, self.stopped = url, collections.deque(), "", False, False
+        self.proc = None
+
+    def run(self):
+        with tempfile.TemporaryDirectory(prefix="cf_ytchat_") as d:
+            path = os.path.join(d, "c.live_chat.json.part")
+            while not self.stopped:
+                for f in os.listdir(d):                       # a restart starts a fresh file
+                    os.remove(os.path.join(d, f))
+                self.proc = subprocess.Popen([which("yt-dlp"), "--no-warnings", "--skip-download", "--write-subs",
+                                              "--sub-langs", "live_chat", "--no-playlist", "-o", os.path.join(d, "c"), self.url],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                pos = 0
+                while not self.stopped and self.proc.poll() is None:
+                    time.sleep(2)
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            f.seek(pos)
+                            lines = f.readlines()
+                        if lines and not lines[-1].endswith(b"\n"):  # half-written line: read it next time
+                            lines.pop()
+                        pos += sum(map(len, lines))
+                        for ln in lines:
+                            self.events.extend(live_chat_line(ln.decode("utf-8", "ignore")))
+                        self.connected, self.error = True, ""
+                if not self.stopped:
+                    self.connected, self.error = False, "Chat connection lost. Retrying."
+                    time.sleep(5)
+
+    def drain(self):
+        out = []
+        while self.events:
+            out.append(self.events.popleft())
+        return out
+
+    def close(self):
+        self.stopped = True
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+
+
 class NoChat:
     connected = False
 
@@ -134,9 +181,10 @@ class Live:
         self.needed_from = 0.0
         self.busy = False
 
-    @staticmethod
-    def _make_chat(platform, channel):
-        return TwitchChat(channel) if platform == "twitch" else NoChat(platform)
+    def _make_chat(self, platform, channel):
+        if platform == "twitch":
+            return TwitchChat(channel)
+        return YouTubeChat(self.url) if platform == "youtube" else NoChat(platform)
 
     # ----- lifecycle -----
     def start(self):
@@ -359,7 +407,7 @@ class Live:
         final = max(0.7, peak) if how == "manual" else 0.7 * peak + 0.3 * speech
         v = db.q("select * from videos where id=?", (self.id,), one=True)
         client = db.q("select * from clients where id=?", (v["client_id"],), one=True) if v.get("client_id") else None
-        title = (re_first_sentence(cw) or f"Moment at {int(peak_t // 60)}:{int(peak_t % 60):02d}")[:70]
+        title = title_of(cw) or f"Moment at {int(peak_t // 60)}:{int(peak_t % 60):02d}"
         comp = {"audio": audio, "heat": None, "chat": chat if self.chat_total else None, "speech": speech, "ai": None}
         reasons = ["You pressed Clip it." if how == "manual" else
                    f"Live moment at {int(peak_t // 60)}:{int(peak_t % 60):02d}: the sound and chat jumped well above this stream's normal level."]
@@ -379,14 +427,9 @@ class Live:
                 "audio": [round(h[0], 3) for h in recent], "chat": [round(h[1], 3) for h in recent],
                 "score": [round(h[2], 3) for h in recent], "moments": self.moments,
                 "chat_status": ("Reading chat" if getattr(self.chat, "connected", False) else (self.chat.error or "Connecting to chat"))
-                if self.platform == "twitch" else self.chat.error,
+                if self.platform in ("twitch", "youtube") else self.chat.error,
                 "chat_messages": self.chat_total, "platform": self.platform, "channel": self.channel,
                 "warmup": max(0.0, self.cfg["warmup"] - self.media_time())}
-
-
-def re_first_sentence(words):
-    txt = " ".join(w["w"] for w in words)
-    return re.split(r"(?<=[.!?])\s", txt)[0] if txt else ""
 
 
 # ---------------- manager ----------------

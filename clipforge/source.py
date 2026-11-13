@@ -77,3 +77,17 @@ def parse_live_chat(path):
             except (KeyError, ValueError, TypeError):
                 continue
     return out
+
+
+def live_chat_line(line):
+    """One line of a live_chat.json being written during a stream -> [(unix time, message)]."""
+    try:
+        acts = json.loads(line)["replayChatItemAction"]["actions"]
+    except (KeyError, ValueError, TypeError):
+        return []
+    out = []
+    for a in acts:
+        r = a.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
+        if r and r.get("timestampUsec"):
+            out.append((int(r["timestampUsec"]) / 1e6, "".join(x.get("text", "") for x in r.get("message", {}).get("runs", []))))
+    return out

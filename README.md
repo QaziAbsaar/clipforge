@@ -20,7 +20,7 @@ A yellow bar at the top tells you if something is missing.
 - 8 caption styles, 1080p / 2K (1440x2560) / 4K (2160x3840), music, one sound effect.
 - Approve = the clip is made and downloads to your browser's Downloads folder automatically.
   (The first time, the browser may ask to allow multiple downloads - say yes.)
-- Go live: paste a Twitch, Kick or YouTube Live link. ClipForge records it, watches the sound and (Twitch) chat,
+- Go live: paste a Twitch, Kick or YouTube Live link. ClipForge records it, watches the sound and (Twitch, YouTube) chat,
   and cuts a clip whenever something big happens. "Clip it now" cuts the last moments by hand.
 - Watch list (under Go live): list the channels you follow, one link per line. ClipForge checks them every minute and
   starts recording when one goes live, and finishes by itself when the stream ends. Stopping a recording by hand keeps
@@ -36,7 +36,7 @@ A yellow bar at the top tells you if something is missing.
 
 ## Good to know
 - Platforms have no "likes" on live streams. ClipForge uses chat bursts (Twitch), crowd/streamer volume and
-  reaction words ("clip that", "no way") instead. Kick and YouTube Live chat are not read live yet: they use sound and picture only.
+  reaction words ("clip that", "no way") instead. Kick chat is not read live yet: Kick streams use sound and picture only.
 - Kick video needs Chrome or Edge installed (Streamlink opens it briefly to get the stream).
 - Only clip streams/videos you have the right to use.
 - 2K/4K rendering is slow on a laptop. Clips are only made when you approve them, so nothing is wasted.
