@@ -12,3 +12,10 @@ talk = [{"w": f"w{i}.", "start": i * 0.5, "end": i * 0.5 + 0.4} for i in range(2
 s, e = snap(talk, 20.0, 40.0, 12.0, 50.0, 100.0, 30)
 assert 12 <= e - s <= 50, (s, e)
 print("ok")
+
+from clipforge.segments import title_of  # noqa: E402
+ws = [{"w": w, "start": i, "end": i + 0.5} for i, w in enumerate("the I told her. Tango 80 is on route. No way he crashed it!".split())]
+assert title_of(ws) == "No way he crashed it!", title_of(ws)
+assert title_of([{"w": "ok", "start": 0, "end": 1}]) == "Ok"
+assert title_of([]) == ""
+print("titles ok")

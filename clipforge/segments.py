@@ -50,6 +50,22 @@ def snap(words, t0, t1, min_len, max_len, duration, fps):
     return s, min(e, duration)
 
 
+def title_of(words, n=70):
+    """A whole sentence from the clip as its title: starts with a capital, 3+ words, hook words win."""
+    sents, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(w["w"])
+        if _ends_sentence(words, i):
+            sents.append(" ".join(cur).strip(" ,"))
+            cur = []
+    ok = [t for t in sents if t[:1].isupper() and len(t.split()) >= 3] or [t for t in sents if len(t.split()) >= 3] or sents
+    if not ok:
+        return ""
+    best = max(ok, key=lambda t: (any(h in t.lower() for h in HOOK_WORDS), min(len(t.split()), 12)))
+    best = best[:1].upper() + best[1:]
+    return best if len(best) <= n else best[:n].rsplit(" ", 1)[0] + "..."
+
+
 def text_score(words, dur):
     if not words:
         return 0.0

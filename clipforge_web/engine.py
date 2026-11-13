@@ -4,7 +4,7 @@ import numpy as np
 
 from clipforge import ai, analyze, audiolib, captions, faces
 from clipforge.render import RES, render_clip
-from clipforge.segments import HOOK_WORDS, snap, text_score
+from clipforge.segments import HOOK_WORDS, snap, text_score, title_of
 from clipforge.source import download, download_section, youtube_chat
 from clipforge.transcribe import load_json, transcribe_file
 from clipforge.util import Cancelled, probe, which
@@ -279,8 +279,7 @@ def analyze_video(job, video_id, p):
         hooks = [h for h in HOOK_WORDS if h in txt]
         first = " ".join(w["w"] for w in c["cw"][:12])
         wps = len(c["cw"]) / max(c["e"] - c["s"], 1)
-        title = (c["ai"] or {}).get("title") or (re.split(r"(?<=[.!?])\s", " ".join(w["w"] for w in c["cw"]))[0]
-                                                  if c["cw"] else "Untitled clip")[:70]
+        title = (c["ai"] or {}).get("title") or title_of(c["cw"]) or "Untitled clip"
         db.ex("insert into clips(video_id,start,end,peak,ws,we,score,scores,reasons,words,title,template,layout,res,"
               "crop_x,music,sfx_intro,sfx_peak,captions,status,render_status,created) "
               "values(?,?,?,?,?,?,?,?,?,?,?,?,'pip',1080,0.5,?,'','',1,'candidate','none',?)",
