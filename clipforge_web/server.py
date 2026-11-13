@@ -228,23 +228,27 @@ def video(vid: int):
 
 
 def _then(body):
-    return {"clips": max(1, min(int(body.get("clips", 20)), 100)), "length": float(body.get("length", 30))}
+    try:
+        return {"clips": max(1, min(int(body.get("clips", 20)), 100)), "length": float(body.get("length", 30))}
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Clip count and length must be numbers.")
 
 
 @app.post("/api/videos/link")
 def add_links(body: dict = Body(...)):
-    urls = [u.strip() for u in body.get("urls", []) if u.strip()]
+    urls = [str(u).strip() for u in body.get("urls") or [] if str(u).strip()]
     if not urls:
         raise HTTPException(400, "Paste at least one video link.")
-    ids = []
-    for u in urls:
+    for u in urls:                                  # check them all before adding any
         if not u.lower().startswith(("http://", "https://")):
             raise HTTPException(400, f"That isn't a web link: {u[:60]}")
+    then, ids = _then(body), []
+    for u in urls:
         vid = db.ex("insert into videos(title,source,status,created,client_id,kind,stage) values(?,?,?,?,?,?,?)",
                     (u, u, "importing", db.now(), body.get("client_id"), "link", "Getting your video"))
         worker.enqueue("ingest", vid, {"max_height": body.get("max_height", 1080), "quick": bool(body.get("quick")),
                                        "cookies_browser": body.get("cookies_browser"),
-                                       "then_analyze": _then(body)})
+                                       "then_analyze": then})
         ids.append(vid)
     return {"ids": ids}
 
@@ -413,11 +417,16 @@ def patch_clip(cid: int, body: dict = Body(...)):
             continue
         if k not in CLIP_FIELDS:
             raise HTTPException(400, f"Can't change '{k}'.")
+        if k in ("res", "captions", "crop_x"):
+            try:
+                val = min(max(float(val), 0.0), 1.0) if k == "crop_x" else int(val)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"'{k}' must be a number.")
         if k == "template" and val not in TEMPLATES:
             raise HTTPException(400, "Unknown caption style.")
         if k == "layout" and val not in ("pip", "stack", "follow", "crop", "blur"):
             raise HTTPException(400, "Framing must be pip, stack, follow, crop or blur.")
-        if k == "res" and int(val) not in RES:
+        if k == "res" and val not in RES:
             raise HTTPException(400, "Resolution must be 1080, 1440 (2K) or 2160 (4K).")
         if k == "status" and val not in ("candidate", "approved", "rejected"):
             raise HTTPException(400, "Unknown status.")
@@ -427,10 +436,13 @@ def patch_clip(cid: int, body: dict = Body(...)):
         if k == "sfx":
             val = db.dumps(_clean_sfx(val))
         sets.append(f"{k}=?")
-        vals.append(int(val) if k in ("res", "captions") else (float(val) if k == "crop_x" else val))
+        vals.append(val)
     if "start" in body or "end" in body:
         limit = v["duration"] if not c["src"] else (c["we"] or v["duration"])
-        s, e = float(body.get("start", c["start"])), float(body.get("end", c["end"]))
+        try:
+            s, e = float(body.get("start", c["start"])), float(body.get("end", c["end"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Start and end must be numbers.")
         s, e = max(0.0, s), min(limit, e)
         if e - s < 3:
             raise HTTPException(400, "A clip must be at least 3 seconds long.")
