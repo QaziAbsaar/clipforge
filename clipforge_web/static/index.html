@@ -196,10 +196,10 @@ function drawLib(){
   const box=$('#lib');if(!box)return;
   sync(box,myVideos(),v=>v.id,v=>[v.title,v.status,Math.round(v.progress),v.clips,v.approved,v.duration].join('|'),v=>{
     const busy=v.status==='importing'||v.status==='analyzing';
-    return `<div class="th"><img src="/api/videos/${v.id}/thumb?s=${v.status}" loading="lazy" alt="" onerror="this.remove()">
+    return `<div class="th">${v.has_file&&v.duration?`<img src="/api/videos/${v.id}/thumb?s=${v.status}" loading="lazy" alt="" onerror="this.remove()">`:''}
       ${v.duration?`<span class="dur">${fmtLong(v.duration)}</span>`:''}${v.status==='live'?'<span class="livebadge"><i></i>LIVE</span>':''}</div>
       <div class="b"><div class="t">${esc(v.title||v.source)}</div>
-      <div class="muted small" style="margin-top:4px">${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'?'Needs attention':'No clips yet'}</div>
+      <div class="muted small" style="margin-top:4px">${v.clips?v.clips+' clips'+(v.approved?' · '+v.approved+' approved':''):busy?esc(v.stage||'Working'):v.status==='error'||v.error?'Needs attention':'No clips yet'}</div>
       ${busy?`<div class="bar" style="margin-top:7px"><i style="width:${Math.max(4,v.progress)}%"></i></div>`:''}</div>`},'vcard',
     el=>{el.setAttribute('role','button');el.tabIndex=0});
 }
@@ -456,8 +456,7 @@ function posAt(t){const p=S.framing&&S.framing.pts;if(!p||!p.length)return null;
   const a=p[lo],b=p[hi];if(t<=a[0])return a[1];if(t>=b[0])return b[1];return a[1]+(b[1]-a[1])*(t-a[0])/Math.max(b[0]-a[0],1e-6)}
 function drawStack(v,f,c){
   const cv=$('#stackcv'),g=cv.getContext('2d'),W=cv.width,H=cv.height,th=Math.round(H*f.top),bh=H-th;
-  if(!v.videoWidth)return;const k=v.videoWidth/f.w,[x,y,w,h]=f.cam.map(n=>n*k);
-  if(f.pip&&f.box)[x,y,w,h]=f.box.map(n=>n*k);
+  if(!v.videoWidth)return;const k=v.videoWidth/f.w,[x,y,w,h]=(f.pip&&f.box?f.box:f.cam).map(n=>n*k);
   if(f.pip){const vh=v.videoHeight,gw=vh*9/16,gx=(v.videoWidth-gw)*c.crop_x,pw=W*f.size,ph=pw*h/w;
     g.drawImage(v,gx,0,gw,vh,0,0,W,H);g.drawImage(v,x,y,w,h,(W-pw)/2,H*f.ptop,pw,ph);return}
   const vh=v.videoHeight,gw=Math.min(v.videoWidth,vh*W/bh),gx=(v.videoWidth-gw)*c.crop_x;
