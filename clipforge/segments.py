@@ -40,6 +40,8 @@ def snap(words, t0, t1, min_len, max_len, duration, fps):
             k = max((k for k in range(i, j + 1) if words[k]["end"] - s <= max_len and _ends_sentence(words, k)),
                     default=None)
             e = (words[k]["end"] + 0.25) if k is not None else s + max_len
+        if e - s < min_len:                                 # little speech (quiet gameplay): keep the asked window
+            s, e = min(s, t0), max(e, t1, s + min_len)
     else:
         s, e = t0, t1
     s, e = max(0.0, s), min(duration, e)
