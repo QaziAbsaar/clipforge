@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ClipForge</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css"><link rel="icon" href="data:,">
 </head>
 <body>
 <header>
@@ -491,9 +491,14 @@ function drawStack(v,f,c){
     g.drawImage(v,gx,0,gw,vh,0,0,W,H);g.drawImage(v,x,y,w,h,(W-pw)/2,H*f.ptop,pw,ph);return}
   const vh=v.videoHeight,gw=Math.min(v.videoWidth,vh*W/bh),gx=(v.videoWidth-gw)*c.crop_x;
   g.drawImage(v,x,y,w,h,0,0,W,th);g.drawImage(v,gx,0,gw,vh,0,th,W,bh)}
+function drawBlur(v,cv){   // like the render: blurred fill behind the whole picture
+  const g=cv.getContext('2d'),W=cv.width,H=cv.height,vw=v.videoWidth,vh=v.videoHeight,cw=vh*W/H,h=W*vh/vw;
+  g.filter='blur(12px) brightness(.7)';g.drawImage(v,(vw-cw)/2,0,cw,vh,-20,-20,W+40,H+40);g.filter='none';
+  g.drawImage(v,0,(H-h)/2,W,h)}
 function applyLayout(){const v=$('#pv');if(!v||!S.clip)return;const c=S.clip,f=S.framing;
   const stack=['stack','pip'].includes(c.layout)&&f&&f.stack&&f.cam,cv=$('#stackcv');
-  cv.hidden=!stack;v.style.visibility=stack?'hidden':'';if(stack)drawStack(v,f,c);
+  const blur=v.videoWidth&&(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam));
+  cv.hidden=!stack&&!blur;v.style.visibility=stack||blur?'hidden':'';if(stack)drawStack(v,f,c);else if(blur)drawBlur(v,cv);
   v.style.objectFit=(c.layout==='blur'||(['stack','pip'].includes(c.layout)&&f&&f.stack&&!f.cam))?'contain':'cover';
   let x=.5;if(c.layout==='crop')x=c.crop_x;else if(c.layout==='follow'){const p=posAt(v.currentTime-c.start);x=p==null?.5:p}
   v.style.objectPosition=(x*100)+'% 50%'}
