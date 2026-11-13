@@ -453,8 +453,8 @@ def render(job, clip_id, p):
         sfx.append((path, 0.0, 0.7))
     for e in json.loads(c["sfx"] or "[]"):                 # placed effects, stored on the video timeline
         path = audiolib.resolve("sfx", e["f"])
-        if path and c["start"] <= e["t"] < c["end"]:
-            sfx.append((path, e["t"] - c["start"], e["v"]))
+        if path and c["start"] - 0.01 <= e["t"] < c["end"]:        # times are rounded to 1 ms
+            sfx.append((path, max(e["t"] - c["start"], 0.0), e["v"]))
     music = audiolib.resolve("music", c["music"])
     job.log(f"Rendering {dur:.0f}s clip at {RES[c['res']][0]}x{RES[c['res']][1]}...")
     render_clip(job, ffmpeg, src, info, start, end, ass, out, layout, c["crop_x"],
