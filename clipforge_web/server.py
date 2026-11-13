@@ -53,7 +53,10 @@ async def auth(request: Request, call_next):
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"detail": "Please sign in again."}, status_code=401)
             return RedirectResponse("/login")
-    return await call_next(request)
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"            # after an update the browser picks up the new page
+    return resp
 
 
 LOGIN_HTML = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>ClipForge</title>
