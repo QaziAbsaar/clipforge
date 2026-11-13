@@ -75,7 +75,11 @@ class Job:
         text = err.read().decode(errors="replace")
         err.close()
         if p.returncode != 0:
-            raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(map(str, cmd[:2]))}\n{text[-1500:]}")
+            self.log(f"Command failed ({p.returncode}): {' '.join(map(str, cmd[:2]))}\n{text[-1500:]}")
+            lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("WARNING")]
+            errs = [ln for ln in lines if ln.startswith("ERROR:")]       # yt-dlp: keep only its reason
+            msg = errs[-1].split(": ", 2)[-1] if errs else "\n".join(lines[-4:])
+            raise RuntimeError(f"{os.path.basename(str(cmd[0]))} failed: {msg[-600:] or 'no details'}")
         return text
 
     def run(self, cmd, cwd=None, show=False):
@@ -106,9 +110,12 @@ def probe(ffprobe, path):
                         "-show_entries", "stream=width,height,r_frame_rate",
                         "-show_entries", "format=duration", "-of", "json", path],
                        capture_output=True, text=True)
-    d = json.loads(r.stdout)
-    s = d["streams"][0]
-    n, _, den = s["r_frame_rate"].partition("/")
-    fps = float(n) / float(den or 1)
-    return {"w": int(s["width"]), "h": int(s["height"]), "fps": fps or 30.0,
-            "duration": float(d["format"]["duration"])}
+    try:
+        d = json.loads(r.stdout)
+        s = d["streams"][0]
+        n, _, den = s["r_frame_rate"].partition("/")
+        fps = float(n) / float(den or 1)
+        return {"w": int(s["width"]), "h": int(s["height"]), "fps": fps or 30.0,
+                "duration": float(d["format"]["duration"])}
+    except (ValueError, KeyError, IndexError, ZeroDivisionError):
+        raise RuntimeError("Couldn't read this video file. It may be damaged or not a video.")
