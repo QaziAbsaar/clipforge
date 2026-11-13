@@ -128,6 +128,7 @@ def write_sendcmd(pts, path, out_fps=30):
 TOP_SHARE = 0.4                        # stacked layout: facecam gets the top 40% of the 9:16 frame, gameplay the rest
 PIP_SIZE, PIP_TOP = 0.5, 0.03          # pip layout: facecam box width and top gap, as share of the frame
 STILL = 10                             # pixel brightness spread (0-255) below which a spot counts as still
+MOVES = 20                             # a live face changes this much frame to frame (real cams 28-40, logos 12-15)
 
 
 def cam_rect(frames, cx, cy, fw):
@@ -163,22 +164,38 @@ def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
     """Gaming streams: find a fixed facecam overlay. Returns {'cam': [x, y, w, h] | None, 'box': ..., 'kind': ...}
     in source px. 'box' is the whole overlay (pip layout); 'cam' is the part of it that fits the stacked top panel.
     kind 'facecam' = small steady face (overlay), 'camera' = big face (talking head, use follow instead), 'none'."""
-    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1)
+    frames, scale = _read_frames(ffmpeg, src, start, end, W, H, fps=1, sw=1024)   # small facecams need the detail
     det = _detector()
-    hits = []
+    groups, big = [], []                                  # each steady face: [(cx, cy, w), ...] in analysis px
     for g in frames:
         min_face = max(16, int(g.shape[1] * 0.025))
-        faces = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
-        if len(faces):
-            x, y, w, h = max(faces, key=lambda f: f[2])
-            hits.append((x + w / 2, y + h / 2, w))
-    if len(frames) == 0 or len(hits) < max(2, 0.3 * len(frames)):
-        return {"cam": None, "box": None, "kind": "none"}
-    fx, fy, ff = (float(np.median([h[i] for h in hits])) for i in range(3))
+        found = det.detectMultiScale(g, scaleFactor=1.1, minNeighbors=6, minSize=(min_face, min_face))
+        if len(found):
+            big.append(max(w for _, _, w, _ in found))
+        for x, y, w, h in found:
+            f = (x + w / 2, y + h / 2, w)
+            grp = next((gr for gr in groups if abs(gr[0][0] - f[0]) < 0.6 * w and abs(gr[0][1] - f[1]) < 0.6 * w), None)
+            grp.append(f) if grp else groups.append([f])
+    groups = sorted((gr for gr in groups if len(gr) >= max(2, 0.6 * len(frames))), key=len, reverse=True)   # real cams: 75-100%; game false hits: <45%
+    pick, rect = None, None
+    camera = len(big) >= max(2, 0.3 * len(frames)) and np.median(big) / scale > 0.22 * W   # talking head, may wander
+    for gr in groups:                                     # a facecam sits in a still box; an IRL or game face doesn't
+        fx, fy, ff = (float(np.median([h[i] for h in gr])) for i in range(3))
+        x0, y0 = int(max(fx - ff / 2, 0)), int(max(fy - ff / 2, 0))
+        if frames[:, y0:y0 + int(ff), x0:x0 + int(ff)].std(axis=0).mean() < MOVES:
+            continue                                      # a logo or still picture, not a person
+        if ff / scale > 0.22 * W:
+            camera = True
+            continue
+        rect = cam_rect(frames, fx, fy, ff)
+        if rect or pick is None:
+            pick = (fx, fy, ff)
+        if rect:
+            break
+    if pick is None:
+        return {"cam": None, "box": None, "kind": "camera" if camera else "none"}
+    fx, fy, ff = pick
     cx, cy, fw = fx / scale, fy / scale, ff / scale
-    if fw > 0.22 * W:
-        return {"cam": None, "box": None, "kind": "camera"}
-    rect = cam_rect(frames, fx, fy, ff)
     if rect:
         bx, by = rect[0] / scale, rect[1] / scale
         bw, bh = (rect[2] - rect[0]) / scale, (rect[3] - rect[1]) / scale
