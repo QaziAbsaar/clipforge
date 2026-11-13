@@ -343,9 +343,37 @@ async function loadFraming(){
   if(!S.clip||!['follow','stack','pip'].includes(S.clip.layout)){if(hint)hint.hidden=true;S.framing=null;applyLayout();return}
   if(hint){hint.hidden=false;hint.innerHTML='<span class="spin"></span>Finding the face'}
   try{const f=await api('/api/clips/'+id+'/framing');if(S.cid!==id)return;S.framing=f;
-    if(hint){hint.innerHTML=f.stack?(f.cam?(f.pip?'Facecam over the gameplay':'Facecam on top, gameplay below'):'No facecam found, showing the whole gameplay'):f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
+    if(hint){hint.innerHTML=f.stack?(f.cam?(f.manual?'Your facecam box':f.pip?'Facecam over the gameplay':'Facecam on top, gameplay below'):'No facecam found, showing the whole gameplay'):f.pts.length?(f.found>.2?`Following the face (${Math.round(f.found*100)}% of the clip)`:'No clear face, using the center'):'Already vertical';setTimeout(()=>{if(hint)hint.hidden=true},3500)}}
   catch(e){if(hint)hint.hidden=true;toast(e.message,true)}
+  const ce=$('#camEdit');if(ce)ce.hidden=!(S.framing&&S.framing.stack);
   applyLayout();
+}
+// Draw the facecam box by hand when detection gets it wrong. One box per video: every clip of it uses it.
+function camEditor(){
+  const v=$('#pv'),f=S.framing;if(!v||!v.videoWidth||!f)return;
+  const W=Math.min(innerWidth-32,900),k=W/f.w,H=Math.round(f.h*k);
+  let b=(f.box||[f.w*.35,f.h*.05,f.w*.3,f.h*.3]).map(n=>n*k),drag=null;
+  const m=document.createElement('div');m.className='modal';
+  m.innerHTML=`<div class="mbox"><h2>Facecam box</h2><p class="muted small">Drag the box over the facecam. Drag the corner dot to resize. Every clip from this video uses it.</p>
+    <canvas id="camcv" width="${W}" height="${H}" style="touch-action:none"></canvas>
+    <div class="row" style="margin-top:10px"><button id="camAuto" class="ghost">Use automatic</button><span style="flex:1"></span><button id="camNo">Cancel</button><button id="camOk" class="primary">Save box</button></div></div>`;
+  document.body.appendChild(m);
+  const cv=m.querySelector('#camcv'),g=cv.getContext('2d');
+  const draw=()=>{g.drawImage(v,0,0,W,H);g.fillStyle='#0008';g.fillRect(0,0,W,H);g.drawImage(v,b[0]/k,b[1]/k,b[2]/k,b[3]/k,b[0],b[1],b[2],b[3]);
+    g.strokeStyle='#8c9bff';g.lineWidth=2;g.strokeRect(b[0],b[1],b[2],b[3]);g.fillStyle='#8c9bff';g.beginPath();g.arc(b[0]+b[2],b[1]+b[3],8,0,7);g.fill()};
+  const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
+  cv.onpointerdown=e=>{const[x,y]=pt(e);cv.setPointerCapture(e.pointerId);
+    drag=Math.hypot(x-b[0]-b[2],y-b[1]-b[3])<16?{rs:1}:(x>b[0]&&x<b[0]+b[2]&&y>b[1]&&y<b[1]+b[3])?{dx:x-b[0],dy:y-b[1]}:null};
+  cv.onpointermove=e=>{if(!drag)return;const[x,y]=pt(e),min=32*k;
+    if(drag.rs){b[2]=Math.min(Math.max(x-b[0],min),W-b[0]);b[3]=Math.min(Math.max(y-b[1],min),H-b[1])}
+    else{b[0]=Math.min(Math.max(x-drag.dx,0),W-b[2]);b[1]=Math.min(Math.max(y-drag.dy,0),H-b[3])}draw()};
+  cv.onpointerup=()=>drag=null;
+  const done=async box=>{await send('PATCH','/api/videos/'+S.vid,{cam_box:box});m.remove();S.framing=null;await loadClips();loadFraming();toast(box?'Facecam box saved for every clip of this video.':'Back to automatic facecam finding.')};
+  m.querySelector('#camOk').onclick=guard(()=>done(b.map(n=>Math.round(n/k))));
+  m.querySelector('#camAuto').onclick=guard(()=>done(null));
+  m.querySelector('#camNo').onclick=()=>m.remove();
+  m.onkeydown=e=>{if(e.key==='Escape')m.remove()};
+  draw();m.querySelector('#camOk').focus();
 }
 async function save(patch){
   const c=await send('PATCH','/api/clips/'+S.cid,patch);Object.assign(S.clip,c);await loadClips();drawCands();drawMap();updateApproveUI();return c;
@@ -362,7 +390,8 @@ function buildEditor(){
      <div class="row muted small" style="margin-top:3px"><span id="tlo"></span><span id="tlen" style="text-align:center"></span><span id="thi" style="text-align:right"></span></div></div></div>
    <div><label for="title">Title (not part of the captions)</label><input id="title" value="${esc(c.title)}"></div>
    <div><label>Framing</label><div class="seg" id="layout"><button data-l="pip">Facecam over gameplay</button><button data-l="stack">Facecam + gameplay split</button><button data-l="follow">Follow the face</button><button data-l="crop">Center</button><button data-l="blur">Blurred fit</button></div>
-     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${['crop','stack','pip'].includes(c.layout)?'':'hidden'} aria-label="Crop position"></div>
+     <input id="cx" type="range" min="0" max="1" step="0.01" value="${c.crop_x}" style="margin-top:8px" ${['crop','stack','pip'].includes(c.layout)?'':'hidden'} aria-label="Crop position">
+     <button id="camEdit" class="fit" style="margin-top:8px" hidden>Adjust facecam box</button></div>
    <div><label>Caption style</label><div class="styles" id="tpls"></div>
      <label style="margin-top:8px"><input type="checkbox" id="capon" ${c.captions?'checked':''}> Burn captions into the video</label></div>
    <div><label>Quality</label><div class="seg" id="res"><button data-r="1080">1080p</button><button data-r="1440">2K</button><button data-r="2160">4K</button></div></div>
@@ -394,6 +423,7 @@ function buildEditor(){
   $('#stNow').onclick=guard(()=>setTimes(v.currentTime,S.clip.end));$('#enNow').onclick=guard(()=>setTimes(S.clip.start,v.currentTime));
   el.querySelectorAll('[data-n]').forEach(b=>b.onclick=guard(()=>{const [k,d]=b.dataset.n.split(':');k==='st'?setTimes(S.clip.start+ +d,S.clip.end):setTimes(S.clip.start,S.clip.end+ +d)}));
   $('#layout').onclick=guard(async e=>{const b=e.target.closest('[data-l]');if(!b)return;await save({layout:b.dataset.l});$('#cx').hidden=!['crop','stack','pip'].includes(S.clip.layout);markSeg();loadFraming()});
+  $('#camEdit').onclick=camEditor;
   $('#res').onclick=guard(async e=>{const b=e.target.closest('[data-r]');if(!b)return;await save({res:+b.dataset.r});markSeg()});
   $('#cx').oninput=e=>{S.clip.crop_x=+e.target.value;applyLayout()};$('#cx').onchange=guard(e=>save({crop_x:+e.target.value}));
   $('#tpls').onclick=guard(async e=>{const b=e.target.closest('[data-t]');if(!b)return;await save({template:b.dataset.t});el.querySelectorAll('#tpls .style').forEach(x=>x.classList.toggle('on',x===b));drawCaption()});

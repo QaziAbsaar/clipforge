@@ -366,7 +366,12 @@ def get_track(job, clip, video):
 
 
 def get_cam(job, clip, video):
-    """Facecam box for the stacked layout (cached until the clip's start or end changes)."""
+    """Facecam box for the stacked layout (cached until the clip's start or end changes).
+    A box drawn by hand on the video wins over detection for all its clips."""
+    if video.get("cam_box"):
+        x, y, w, h = json.loads(video["cam_box"])
+        return {"cam": faces.fit_panel(x, y, w, h, x + w / 2, y + h / 2), "box": [x, y, w, h], "kind": "facecam",
+                "exact": True, "manual": True}
     if clip["cam"]:
         c = json.loads(clip["cam"])
         if "box" in c and abs(c["start"] - clip["start"]) < 0.01 and abs(c["end"] - clip["end"]) < 0.01:
@@ -386,7 +391,7 @@ def framing(clip, video):
         if c["kind"] != "camera":
             return {"stack": True, "pip": clip["layout"] == "pip", "size": faces.PIP_SIZE, "ptop": faces.PIP_TOP,
                     "kind": c["kind"], "cam": c["cam"], "box": c["box"], "w": video["w"], "h": video["h"],
-                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": []}
+                    "top": faces.TOP_SHARE, "found": 1.0 if c["cam"] else 0.0, "pts": [], "manual": bool(c.get("manual"))}
     t = get_track(None, clip, video)
     room = max(video["w"] - t["cw"], 1)
     return {"found": t["found"], "cw": t["cw"], "w": video["w"], "h": video["h"],

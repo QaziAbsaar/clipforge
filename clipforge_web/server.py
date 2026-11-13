@@ -212,6 +212,7 @@ def _video(vid):
 def _video_out(v):
     o = {k: x for k, x in v.items() if k not in ("path", "info_path", "curve")}
     o["curve"] = json.loads(v["curve"]) if v["curve"] else None
+    o["cam_box"] = json.loads(v["cam_box"]) if v.get("cam_box") else None
     o["has_file"] = bool(v["path"])
     return o
 
@@ -235,6 +236,26 @@ def _then(body):
         return {"clips": max(1, min(int(body.get("clips", 20)), 100)), "length": float(body.get("length", 30))}
     except (TypeError, ValueError):
         raise HTTPException(400, "Clip count and length must be numbers.")
+
+
+@app.patch("/api/videos/{vid}")
+def patch_video(vid: int, body: dict = Body(...)):
+    """cam_box: [x, y, w, h] in video pixels, the facecam overlay drawn by hand; null goes back to automatic."""
+    v = _video(vid)
+    if set(body) - {"cam_box"}:
+        raise HTTPException(400, "Only the facecam box can be changed here.")
+    box = body.get("cam_box")
+    if box is not None:
+        try:
+            x, y, w, h = (round(float(n)) for n in box)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "The facecam box needs x, y, width and height.")
+        if not v["w"] or w < 32 or h < 32 or x < 0 or y < 0 or x + w > v["w"] or y + h > v["h"]:
+            raise HTTPException(400, "The facecam box must be inside the video and at least 32 pixels.")
+        box = db.dumps([x, y, w, h])
+    db.ex("update videos set cam_box=? where id=?", (box, vid))
+    db.ex("update clips set render_status='stale' where video_id=? and render_status='done' and layout in ('pip','stack')", (vid,))
+    return _video_out(_video(vid))
 
 
 @app.post("/api/videos/link")

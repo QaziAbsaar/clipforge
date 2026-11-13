@@ -202,9 +202,14 @@ def find_facecam(ffmpeg, src, W, H, start, end, out_w=1080, out_h=1920):
     else:                                                 # guess the overlay from the face size
         bw, bh = min(fw * 3.6, W * 0.5), min(fw * 2.2, H)
         bx, by = min(max(cx - bw / 2, 0), W - bw), min(max(cy - bh * 0.45, 0), H - bh)
-    aspect = out_w / (out_h * TOP_SHARE)                   # shape of the top panel: cut it out of the overlay
+    return {"cam": fit_panel(bx, by, bw, bh, cx, cy, out_w, out_h),
+            "box": [_even(bx), _even(by), _even(bw), _even(bh)], "kind": "facecam", "exact": bool(rect)}
+
+
+def fit_panel(bx, by, bw, bh, cx, cy, out_w=1080, out_h=1920):
+    """The part of the overlay box (around the face at cx, cy) that fills the stacked layout's top panel."""
+    aspect = out_w / (out_h * TOP_SHARE)
     cw, ch = (bh * aspect, bh) if bw / bh > aspect else (bw, bw / aspect)
     x = min(max(cx - cw / 2, bx), bx + bw - cw)
     y = min(max(cy - ch * 0.45, by), by + bh - ch)       # face a little above the panel centre
-    return {"cam": [_even(x), _even(y), _even(cw), _even(ch)],
-            "box": [_even(bx), _even(by), _even(bw), _even(bh)], "kind": "facecam", "exact": bool(rect)}
+    return [_even(x), _even(y), _even(cw), _even(ch)]
