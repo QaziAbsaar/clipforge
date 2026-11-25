@@ -7,6 +7,11 @@ import subprocess
 
 multiprocessing.freeze_support()
 
+# The installer puts ffmpeg, ffprobe, yt-dlp and streamlink in bin\ next to ClipForge.exe
+if getattr(sys, "frozen", False):
+    _bin = os.path.join(os.path.dirname(sys.executable), "bin")
+    os.environ["PATH"] = os.pathsep.join([_bin, os.path.join(_bin, "streamlink", "bin"), os.environ.get("PATH", "")])
+
 # On Windows, suppress black console windows for all child processes (ffmpeg, yt-dlp, ffprobe)
 if os.name == "nt" and not getattr(subprocess, "_clipforge_silent_applied", False):
     _RealPopen = subprocess.Popen
@@ -61,8 +66,6 @@ try:
         targets = []
         if getattr(sys, "frozen", False):
             targets.append(os.path.join(os.path.dirname(sys.executable), "cookies.txt"))
-        targets.append(r"c:\attiq\clipping software\clipforge\cookies.txt")
-        targets.append(r"c:\attiq\clipping software\clipforge\dist\ClipForge\cookies.txt")
         for t in targets:
             if not os.path.exists(t) or os.path.getsize(t) != os.path.getsize(cf):
                 try:
