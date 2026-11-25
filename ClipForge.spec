@@ -23,6 +23,8 @@ hidden = (
     collect_submodules('clipforge') +
     collect_submodules('clipforge_web') +
     collect_submodules('curl_cffi') +
+    collect_submodules('rapidocr_onnxruntime') +
+    collect_submodules('piper', filter=lambda n: not n.startswith(('piper.train', 'piper.http_server'))) +
     ['engineio.async_drivers.threading',
      'h11', 'httptools', 'websockets', 'websocket', 'wsproto',
      'email.mime.multipart', 'email.mime.text',
@@ -53,6 +55,8 @@ datas += collect_data_files('streamlink')
 datas += collect_data_files('pycountry')
 datas += collect_data_files('certifi')
 datas += collect_data_files('curl_cffi')
+datas += collect_data_files('rapidocr_onnxruntime')   # OCR models for GTA banners
+datas += collect_data_files('piper')                  # espeak-ng-data for voice-over
 
 # OpenCV haar cascades
 import cv2
@@ -69,7 +73,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'PIL', 'scipy', 'pandas', 'IPython', 'notebook', 'pytest'],
+    excludes=['tkinter', 'matplotlib', 'scipy', 'pandas', 'IPython', 'notebook', 'pytest'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
