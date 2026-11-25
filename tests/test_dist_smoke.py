@@ -1,73 +1,52 @@
-import subprocess, time, urllib.request, json, os
+"""Start a built ClipForge exe and check it works.
+Run: python tests/test_dist_smoke.py path/to/ClipForge.exe   (skips when no path is given)"""
+import json, os, subprocess, sys, tempfile, time, urllib.request
 
-exe = r'c:\attiq\clipping software\clipforge\dist\ClipForge\ClipForge.exe'
-env = os.environ.copy()
-env['CLIPFORGE_PORT'] = '7890'
-env['CLIPFORGE_NO_BROWSER'] = '1'
+if len(sys.argv) < 2:
+    print("skip: pass the path to the built ClipForge exe")
+    sys.exit(0)
 
+exe = os.path.abspath(sys.argv[1])
+data = tempfile.mkdtemp()
+env = dict(os.environ, CLIPFORGE_PORT="7890", CLIPFORGE_DATA=data)
 proc = subprocess.Popen([exe], env=env)
-print('Started ClipForge.exe PID:', proc.pid)
 
-def check_url(url, method='GET', data=None):
-    req = urllib.request.Request(url, data=data, method=method)
-    if data:
-        req.add_header('Content-Type', 'application/json')
-    try:
-        with urllib.request.urlopen(req, timeout=5) as res:
-            return res.status, res.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.read()
-    except Exception as e:
-        return None, str(e).encode()
+
+def get(path):
+    with urllib.request.urlopen("http://127.0.0.1:7890" + path, timeout=5) as r:
+        return r.status, json.loads(r.read() or b"null")
+
 
 try:
-    ready = False
-    for i in range(25):
+    for _ in range(90):                              # the first start unpacks a lot, give it time
         time.sleep(1)
-        code, content = check_url('http://127.0.0.1:7890/api/settings')
-        if code == 200:
-            ready = True
-            print('Server is ready on port 7890! Status 200')
-            print('Settings:', content.decode('utf-8')[:200])
-            break
-        print(f'Waiting... ({i+1}/25), status: {code}')
-    
-    if not ready:
-        raise RuntimeError('Server did not start in time')
+        try:
+            if get("/healthz")[0] == 200:
+                break
+        except Exception:
+            pass
+        if proc.poll() is not None:
+            raise SystemExit(f"ClipForge exited with code {proc.returncode}")
+    else:
+        raise SystemExit("ClipForge did not start in 90 s")
 
-    # Test GET /api/videos
-    code, vids = check_url('http://127.0.0.1:7890/api/videos')
-    print('GET /api/videos:', code, len(vids))
-
-    # Test GET /api/videos/1/clips
-    code, clips = check_url('http://127.0.0.1:7890/api/videos/1/clips')
-    print('GET /api/videos/1/clips:', code)
-    clips_obj = json.loads(clips.decode('utf-8'))
-    print(f'Total clips: {len(clips_obj)}')
-    if clips_obj:
-        print(f'Clip 1 layout: {clips_obj[0].get("layout")}')
-
-    # Test GET /api/clips/1/cues
-    code, cues = check_url('http://127.0.0.1:7890/api/clips/1/cues')
-    print('GET /api/clips/1/cues:', code)
-    cues_obj = json.loads(cues.decode('utf-8'))
-    print(f'Total cues returned: {len(cues_obj)}')
-
-    # Test GET /api/clips/1/source
-    code, src = check_url('http://127.0.0.1:7890/api/clips/1/source')
-    print('GET /api/clips/1/source:', code, f'bytes: {len(src)}')
-
-    # Test POST /api/videos/1/approve_all
-    code, app_res = check_url('http://127.0.0.1:7890/api/videos/1/approve_all', method='POST', data=b'{}')
-    print('POST /api/videos/1/approve_all:', code, app_res.decode('utf-8'))
-
-    print('ALL SMOKE TESTS PASSED PERFECTLY!')
-
+    _, health = get("/api/health")
+    print("health:", health)
+    missing = [k for k, ok in health.items() if not ok]
+    assert not missing, f"missing in the build: {missing}"
+    _, settings = get("/api/settings")
+    assert settings.get("voice"), "voice-over (piper) is missing in the build"
+    assert get("/api/videos")[0] == 200
+    with urllib.request.urlopen("http://127.0.0.1:7890/", timeout=5) as r:
+        assert b"ClipForge" in r.read()
+    print("ok")
 finally:
     proc.terminate()
     try:
-        proc.wait(timeout=3)
-    except:
+        proc.wait(timeout=5)
+    except Exception:
         proc.kill()
-    print('Terminated test ClipForge process.')
-
+    log = os.path.join(data, "clipforge.log")
+    if os.path.exists(log):
+        print("--- clipforge.log ---")
+        print(open(log, encoding="utf-8", errors="replace").read()[-4000:])
