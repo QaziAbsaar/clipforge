@@ -2,7 +2,15 @@
 
 Full guide to every screen and button: [MANUAL.md](MANUAL.md) (also as [MANUAL.pdf](MANUAL.pdf)).
 
-## Run it (Windows)
+## Install on Windows (easiest)
+1. Download `ClipForge-Setup-x.y.z.exe` from [Releases](https://github.com/QaziAbsaar/clipforge/releases/latest).
+2. Run it. No admin rights needed. FFmpeg, yt-dlp and Streamlink are included.
+3. Open ClipForge from the Start menu or the Desktop.
+Windows may say "Windows protected your PC" because the installer is not signed: press More info, then Run anyway.
+
+New version: push a tag like `v0.7.1`; GitHub builds the installer and adds it to Releases.
+
+## Run it from the source (Windows)
 1. Extract the zip to a normal folder (not from inside the zip), e.g. C:\ClipForge.
 2. Double-click Install-Windows.bat once (installs Python 3.12 + FFmpeg if missing, then the packages, and puts a
    ClipForge shortcut on the Desktop). Needs internet + Windows 10/11 with winget.

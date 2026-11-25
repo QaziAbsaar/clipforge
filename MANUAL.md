@@ -22,7 +22,14 @@ Contents
 
 ## 1. Start ClipForge
 
-**Windows**
+**Windows installer (easiest)**
+1. Download `ClipForge-Setup-x.y.z.exe` from https://github.com/QaziAbsaar/clipforge/releases/latest.
+2. Run it. It needs no admin rights. FFmpeg, yt-dlp and Streamlink are included.
+3. If Windows says "Windows protected your PC", press **More info**, then **Run anyway**. The installer is not signed.
+4. Open **ClipForge** from the Start menu or the Desktop shortcut.
+5. To update, run the newer installer. Your clips and settings are kept.
+
+**Windows from the source folder**
 1. Extract the zip to a normal folder, for example `C:\ClipForge`. Do not run it from inside the zip.
 2. Double-click `Install-Windows.bat` once. It installs Python, FFmpeg and the packages, and puts a ClipForge
    shortcut on the Desktop. It needs internet and Windows 10 or 11.
