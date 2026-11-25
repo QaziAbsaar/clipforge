@@ -375,7 +375,7 @@ def approve_all_clips(vid: int):
         try:
             cid = c["id"]
             db.ex("update clips set status='approved' where id=?", (cid,))
-            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
+            is_rendered = c["render_status"] != "stale" and bool(c["render_path"] and os.path.exists(c["render_path"]))
             needs_render = not is_rendered
             if needs_render and c["render_status"] != "running":
                 worker.enqueue("render", cid)
@@ -396,7 +396,7 @@ def approve_batch_clips(body: dict = Body(...)):
             if not c:
                 continue
             db.ex("update clips set status='approved' where id=?", (cid,))
-            is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
+            is_rendered = c["render_status"] != "stale" and bool(c["render_path"] and os.path.exists(c["render_path"]))
             if not is_rendered and c["render_status"] != "running":
                 worker.enqueue("render", cid)
             count += 1
@@ -718,7 +718,7 @@ def approve_clip(cid: int, body: Optional[dict] = Body(None)):
     if s and s["status"] == "no" and not (body or {}).get("permission"):
         raise HTTPException(409, f"{s['name']} doesn't allow clipping. Only go on if you have their permission.")
     db.ex("update clips set status='approved' where id=?", (cid,))
-    is_rendered = bool(c["render_path"] and os.path.exists(c["render_path"]))
+    is_rendered = c["render_status"] != "stale" and bool(c["render_path"] and os.path.exists(c["render_path"]))
     needs_render = not is_rendered
     if needs_render and c["render_status"] != "running":
         worker.enqueue("render", cid)
