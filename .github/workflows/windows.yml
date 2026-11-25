@@ -1,0 +1,69 @@
+name: Windows installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller==6.11.1
+          pip install --no-deps -r requirements-extras.txt
+
+      - name: Build ClipForge.exe
+        run: pyinstaller --noconfirm ClipForge.spec
+
+      - name: Add ffmpeg, yt-dlp and streamlink
+        run: |
+          $bin = "dist\ClipForge\bin"
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ff.zip
+          Expand-Archive ff.zip ff
+          Copy-Item (Get-ChildItem ff -Recurse -Filter ffmpeg.exe).FullName $bin
+          Copy-Item (Get-ChildItem ff -Recurse -Filter ffprobe.exe).FullName $bin
+          Invoke-WebRequest https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -OutFile "$bin\yt-dlp.exe"
+          $rel = Invoke-RestMethod https://api.github.com/repos/streamlink/windows-builds/releases/latest -Headers @{ Authorization = "Bearer ${{ github.token }}" }
+          $asset = $rel.assets | Where-Object { $_.name -match 'x86_64\.zip$' } | Select-Object -First 1
+          Write-Host "streamlink: $($asset.name)"
+          Invoke-WebRequest $asset.browser_download_url -OutFile sl.zip
+          Expand-Archive sl.zip sl
+          Move-Item (Get-ChildItem sl -Directory | Select-Object -First 1).FullName "$bin\streamlink"
+          Get-ChildItem $bin -Recurse -Filter *.exe | Select-Object -ExpandProperty FullName
+
+      - name: Smoke test
+        run: python tests/test_dist_smoke.py dist\ClipForge\ClipForge.exe
+
+      - name: Make installer
+        run: |
+          $env:CLIPFORGE_VERSION = if ($env:GITHUB_REF_TYPE -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.${{ github.run_number }}" }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc installer\ClipForge.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist\ClipForge-Setup-*.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipForge-Setup
+          path: dist/ClipForge-Setup-*.exe
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ClipForge-Setup-*.exe
