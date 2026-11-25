@@ -1,5 +1,7 @@
 # ClipForge v0.7
 
+Full guide to every screen and button: [MANUAL.md](MANUAL.md).
+
 ## Run it (Windows)
 1. Extract the zip to a normal folder (not from inside the zip), e.g. C:\ClipForge.
 2. Double-click Install-Windows.bat once (installs Python 3.12 + FFmpeg if missing, then the packages, and puts a
